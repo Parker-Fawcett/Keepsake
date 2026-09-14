@@ -164,7 +164,7 @@ function Onboarding({ onComplete, onImported }) {
   const [note, setNote] = useState('')
 
   const finish = () => {
-    localStorage.setItem('keepsake-onboarded', 'true')
+    localStorage.setItem('keepsake-onboarded-v2', 'true')
     onComplete(note)
   }
 
@@ -455,7 +455,7 @@ function AddMemory({ people, onSaved, onImported }) {
 }
 
 export default function App() {
-  const [onboarding, setOnboarding] = useState(() => localStorage.getItem('keepsake-onboarded') !== 'true')
+  const [onboarding, setOnboarding] = useState(() => localStorage.getItem('keepsake-onboarded-v2') !== 'true')
   const [tab, setTab] = useState('today')
   const [people, setPeople] = useState(peopleSeed)
   const [selected, setSelected] = useState(null)
