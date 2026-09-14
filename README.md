@@ -6,6 +6,7 @@ Keepsake is a relationship-aware notes app. Paste or speak messy notes and it or
 
 ```bash
 npm install
+npm run db:migrate
 npm run dev
 ```
 
@@ -22,4 +23,16 @@ Open the local address printed by the development command (normally `http://loca
 - Three-step onboarding with an initial note dump and contact import
 - Phone contact, LinkedIn Connections CSV, and Facebook export entry points
 
-The current parsing experience is a local interaction prototype. Production classification, authentication, encrypted storage, and push notification scheduling will be added behind service boundaries in the next phase.
+## Backend
+
+The app now runs through a small Express server with a server-only Neon Postgres connection. Copy `.env.example` to `.env.local`, add the Neon connection string, and run the migration before starting the app.
+
+Current API routes:
+
+- `GET /api/health` checks the database connection
+- `GET /api/people` lists saved people
+- `POST /api/people` creates a person
+- `POST /api/notes` stores a raw note for processing
+- `POST /api/imports` records an import job
+
+The database includes users, people, notes, note-person links, facts, important dates, reminders, and imports. The current local build uses one demo user; production authentication and row-level user isolation are the next backend milestone.

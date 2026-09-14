@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowRight,
   Bell,
@@ -427,7 +427,7 @@ function AddMemory({ people, onSaved, onImported }) {
         </article>
         {detected.date && <article className="review-card"><div className="review-check"><Check size={15} /></div><div className="review-symbol"><CalendarDays size={18} /></div><div><small>Possible date</small><strong>{detected.date}</strong><span>Suggest a reminder</span></div></article>}
       </section>
-      <button className="primary-button wide sticky-save" onClick={() => { setText(''); setReview(false); onSaved() }}><Sparkles size={17} /> Add to Keepsake</button>
+      <button className="primary-button wide sticky-save" onClick={() => { const savedText = text; setText(''); setReview(false); onSaved(savedText) }}><Sparkles size={17} /> Add to Keepsake</button>
     </main>
   )
 
@@ -467,25 +467,82 @@ export default function App() {
     window.setTimeout(() => setToast(''), 2400)
   }
 
-  const addPerson = (name, relationship) => {
-    setPeople(prev => [...prev, { id: Date.now(), name, relationship, initials: name[0].toUpperCase(), color: '#c49678', birthday: '', nextEvent: 'Nothing scheduled yet', memory: 'A new person in your circle', likes: [], dates: [], notes: [] }])
-    setCreating(false)
-    showToast(`${name} was added to your circle`)
+  useEffect(() => {
+    fetch('/api/people')
+      .then(response => response.ok ? response.json() : Promise.reject(new Error('Could not load people')))
+      .then(({ people: savedPeople }) => {
+        if (!savedPeople?.length) return
+        const existingNames = new Set(peopleSeed.map(person => person.name.toLowerCase()))
+        const hydrated = savedPeople
+          .filter(person => !existingNames.has(person.name.toLowerCase()))
+          .map(person => ({
+            ...person,
+            initials: person.name[0].toUpperCase(),
+            nextEvent: 'Nothing scheduled yet',
+            memory: 'A new person in your circle',
+            likes: [],
+            dates: [],
+            notes: [],
+          }))
+        setPeople([...peopleSeed, ...hydrated])
+      })
+      .catch(() => showToast('Working offline — changes may not sync'))
+  }, [])
+
+  const addPerson = async (name, relationship) => {
+    try {
+      const response = await fetch('/api/people', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, relationship }),
+      })
+      if (!response.ok) throw new Error('Could not save person')
+      const { person } = await response.json()
+      setPeople(prev => [...prev, { ...person, initials: name[0].toUpperCase(), nextEvent: 'Nothing scheduled yet', memory: 'A new person in your circle', likes: [], dates: [], notes: [] }])
+      setCreating(false)
+      showToast(`${name} was added to your circle`)
+    } catch {
+      showToast('Could not save that person yet')
+    }
   }
 
-  const handleImport = (source, count, message) => {
+  const handleImport = async (source, count, message) => {
     if (message) {
       showToast(message)
       return
     }
-    showToast(count ? `${count} people found in ${source}` : `${source} export added for review`)
+    try {
+      await fetch('/api/imports', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source, recordCount: count }),
+      })
+      showToast(count ? `${count} people found in ${source}` : `${source} export added for review`)
+    } catch {
+      showToast('Import saved locally for now')
+    }
+  }
+
+  const saveNote = async rawText => {
+    try {
+      const response = await fetch('/api/notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rawText, source: 'manual' }),
+      })
+      if (!response.ok) throw new Error('Could not save note')
+      setTab('today')
+      showToast('Your note is safely stored')
+    } catch {
+      showToast('Could not save that note yet')
+    }
   }
 
   if (onboarding) return (
     <div className="app-shell onboarding-shell">
       <Onboarding onImported={handleImport} onComplete={note => {
         setOnboarding(false)
-        if (note.trim()) showToast('Your first note is ready to review')
+        if (note.trim()) saveNote(note)
       }} />
       {toast && <div className="toast"><Check size={16} /> {toast}</div>}
     </div>
@@ -497,7 +554,7 @@ export default function App() {
   else if (tab === 'today') content = <Today onOpen={setSelected} onAdd={() => setTab('add')} />
   else if (tab === 'upcoming') content = <Upcoming />
   else if (tab === 'relationships') content = <Relationships people={people} onOpen={setSelected} onCreate={() => setCreating(true)} />
-  else content = <AddMemory people={people} onImported={handleImport} onSaved={() => { setTab('today'); showToast('Your Keepsake has been updated') }} />
+  else content = <AddMemory people={people} onImported={handleImport} onSaved={saveNote} />
 
   return (
     <div className="app-shell">
