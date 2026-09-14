@@ -9,6 +9,8 @@ npm install
 npm run dev
 ```
 
+Open the local address printed by the development command (normally `http://localhost:5173`). Do not open `index.html` directly—the source app needs the local development server.
+
 ## Prototype scope
 
 - Today dashboard with people and timely relationship nudges
