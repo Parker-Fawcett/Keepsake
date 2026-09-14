@@ -251,3 +251,12 @@ button { color: inherit; }
 .auth-field input { border: 0; border-bottom: 1px solid var(--ink); background: transparent; outline: 0; padding: 11px 1px; font-size: 13px; }
 .auth-error { color: var(--brick); font-size: 11px; margin: 4px 0 0; }
 .auth-switch { margin: 12px auto 0; display: block; }
+.auth-required { background: var(--paper); }
+.auth-required .auth-sheet { margin: auto; }
+.auth-loading { padding: 0; display: grid; place-content: center; justify-items: center; gap: 12px; color: var(--forest); font: 500 9px/1 var(--mono); letter-spacing: .5px; }
+.auth-loading-mark { width: 44px; height: 44px; display: grid; place-items: center; background: var(--forest); color: white; }
+.empty-state { min-height: 132px; padding: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; text-align: center; color: var(--muted); border: 1px dashed var(--line); background: rgba(255,253,248,.45); }
+.empty-state strong { color: var(--ink); font-family: var(--display); font-size: 18px; font-weight: 500; }
+.empty-state span { max-width: 280px; font-size: 10px; line-height: 1.5; }
+.empty-card { width: 100%; grid-column: 1 / -1; cursor: pointer; }
+.empty-inline { width: 100%; min-height: 92px; border: 1px dashed var(--line); background: transparent; color: var(--forest); display: flex; align-items: center; justify-content: center; gap: 7px; cursor: pointer; font-size: 11px; }

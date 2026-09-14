@@ -1,0 +1,32 @@
+name: Deliver reminders
+
+on:
+  schedule:
+    # Avoid the top of the hour, when scheduled Actions are most congested.
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: keepsake-reminder-delivery
+  cancel-in-progress: false
+
+jobs:
+  deliver:
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.REMINDERS_ENABLED == 'true' }}
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --omit=dev
+      - run: npm run worker
+        env:
+          NODE_ENV: production
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          KEEPSAKE_WEBHOOK_URL: ${{ secrets.KEEPSAKE_WEBHOOK_URL }}

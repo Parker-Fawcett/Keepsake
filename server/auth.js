@@ -35,7 +35,9 @@ export async function createSession(userId, response) {
   `
   response.cookie(COOKIE_NAME, token, {
     httpOnly: true,
-    sameSite: 'strict',
+    // Lax still blocks cross-site form submissions, while allowing the
+    // session to survive the top-level redirect back from Google OAuth.
+    sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production',
     maxAge: SESSION_DAYS * 24 * 60 * 60 * 1000,
     path: '/',
@@ -67,5 +69,5 @@ export function requireAuth(request, response, next) {
 export async function clearSession(request, response) {
   const token = parseCookies(request.headers.cookie)[COOKIE_NAME]
   if (token) await sql`DELETE FROM sessions WHERE token_hash = ${tokenHash(token)}`
-  response.clearCookie(COOKIE_NAME, { path: '/', sameSite: 'strict' })
+  response.clearCookie(COOKIE_NAME, { path: '/', sameSite: 'lax' })
 }

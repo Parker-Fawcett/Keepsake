@@ -47,4 +47,6 @@ Current API routes:
 
 Notes without `OPENAI_API_KEY` use local heuristics; with a key they use the model and fall back to local on any error. The delivery worker sends due reminders through the server log, or a `KEEPSAKE_WEBHOOK_URL` when set; native push slots into `server/notify.js` once provider credentials exist.
 
-The database includes users, sessions, people, notes, note-person links, facts, important dates, reminders, device tokens, and imports. Routes fall back to a demo owner when signed out; creator-owned checks and request rate limits guard every endpoint.
+The Docker production command applies pending database migrations before starting the web server. Reminder delivery runs hourly through `.github/workflows/reminders.yml`, keeping the private repository within GitHub Free's included Actions allowance under normal use. Add `DATABASE_URL` and `KEEPSAKE_WEBHOOK_URL` as repository Actions secrets, then set the repository variable `REMINDERS_ENABLED=true`. Until that variable is enabled, scheduled runs are skipped before a runner starts and consume no Actions minutes. Google OAuth credentials are encrypted with `TOKEN_ENCRYPTION_KEY`; existing plaintext credentials are upgraded the next time they are used.
+
+The database includes users, sessions, people, notes, note-person links, facts, important dates, reminders, device tokens, and imports. All relationship-data routes require a signed-in account, use creator-owned checks, and are request-rate-limited.

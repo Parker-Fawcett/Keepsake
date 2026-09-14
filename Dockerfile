@@ -11,4 +11,4 @@ ENV NODE_ENV=production
 ENV PORT=5173
 EXPOSE 5173
 
-CMD ["npm", "start"]
+CMD ["npm", "run", "start:prod"]

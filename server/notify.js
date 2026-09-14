@@ -8,10 +8,12 @@ export function buildNotificationPayload({ title, body, tokens }) {
   return { title, body, tokens }
 }
 
-export async function sendNotification({ title, body, tokens = [] }) {
+export async function sendNotification({ title, body, tokens = [] }, env = process.env) {
   const payload = buildNotificationPayload({ title, body, tokens })
-  const webhook = process.env.KEEPSAKE_WEBHOOK_URL
+  const webhook = env.KEEPSAKE_WEBHOOK_URL
   if (!webhook) {
+    // Never mark a production reminder delivered when it only reached logs.
+    if (env.NODE_ENV === 'production') throw new Error('KEEPSAKE_WEBHOOK_URL is required for production reminder delivery.')
     console.log(`[notify] ${title} — ${body} (${tokens.length} device${tokens.length === 1 ? '' : 's'})`)
     return { delivered: true, transport: 'log', payload }
   }

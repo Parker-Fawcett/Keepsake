@@ -2,14 +2,15 @@ import express from 'express'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { createServer as createViteServer } from 'vite'
-import { attachUser, clearSession, createSession, hashPassword, passwordMatches } from './auth.js'
-import { DEMO_USER_ID, sql } from './db.js'
+import { attachUser, clearSession, createSession, hashPassword, passwordMatches, requireAuth } from './auth.js'
+import { sql } from './db.js'
 import { extractRelationships } from './extract.js'
 import { buildImportReview, MAX_REVIEW_RECORDS, validateImportConfirm } from './imports.js'
 import { buildAuthUrl, exchangeCode, fetchConnections, isGoogleConfigured, redirectUriFor, refreshAccessToken } from './google.js'
 import { validateConfirmPayload } from './confirm.js'
 import { rateLimit } from './ratelimit.js'
 import { buildRemindersForDate, DEFAULT_REMINDER_RULES } from './reminders.js'
+import { decryptSecret, encryptSecret, hasTokenEncryptionKey, isEncryptedSecret } from './secrets.js'
 import { isValidEmail, isValidImportSource, isValidName, isValidNoteText, isValidOptionalEmail, isValidOptionalPhone, isValidPassword, isValidPushPlatform, isValidPushToken, normalizeEmail } from './validate.js'
 
 const app = express()
@@ -17,12 +18,25 @@ const port = Number(process.env.PORT || 5173)
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 app.disable('x-powered-by')
+if (process.env.NODE_ENV === 'production') app.set('trust proxy', 1)
+if (process.env.NODE_ENV === 'production') {
+  app.use((_request, response, next) => {
+    response.set({
+      'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'",
+      'Permissions-Policy': 'camera=(), geolocation=(), microphone=(self)',
+      'Referrer-Policy': 'no-referrer',
+      'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+      'X-Content-Type-Options': 'nosniff',
+    })
+    next()
+  })
+}
 app.use(express.json({ limit: '2mb' }))
 app.use(attachUser)
 app.use('/api', rateLimit({ windowMs: 60 * 1000, max: 300 }))
 const authLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 30 })
 
-const ownerIdFor = request => request.user?.id ?? DEMO_USER_ID
+const ownerIdFor = request => request.user.id
 
 app.get('/api/health', async (_request, response, next) => {
   try {
@@ -62,6 +76,7 @@ app.post('/api/auth/signup', authLimiter, async (request, response, next) => {
     await createSession(user.id, response)
     response.status(201).json({ user })
   } catch (error) {
+    if (error?.code === '23505') return response.status(409).json({ error: 'That email is already registered. Try signing in.' })
     next(error)
   }
 })
@@ -71,9 +86,9 @@ app.post('/api/auth/login', authLimiter, async (request, response, next) => {
     const email = normalizeEmail(request.body?.email)
     const password = String(request.body?.password || '')
     const [user] = await sql`SELECT id, email, display_name, password_salt, password_hash FROM users WHERE lower(email) = ${email}`
-    if (!user?.password_hash) return response.status(401).json({ error: 'No account found for that email.' })
+    if (!user?.password_hash) return response.status(401).json({ error: 'Email or password is incorrect.' })
     const ok = await passwordMatches(password, user.password_salt, user.password_hash)
-    if (!ok) return response.status(401).json({ error: 'That password did not match.' })
+    if (!ok) return response.status(401).json({ error: 'Email or password is incorrect.' })
     await createSession(user.id, response)
     response.json({ user: { id: user.id, email: user.email, display_name: user.display_name } })
   } catch (error) {
@@ -89,6 +104,10 @@ app.post('/api/auth/logout', async (request, response, next) => {
     next(error)
   }
 })
+
+// Everything below this line contains private relationship data. A request
+// must have a valid session; there is no shared fallback account.
+app.use('/api', requireAuth)
 
 app.post('/api/push-tokens', async (request, response, next) => {
   try {
@@ -120,12 +139,13 @@ app.delete('/api/push-tokens', async (request, response, next) => {
 })
 
 const OAUTH_STATE_COOKIE = 'keepsake_oauth_state'
+const googleConfigured = () => isGoogleConfigured() && (process.env.NODE_ENV !== 'production' || hasTokenEncryptionKey())
 
 app.get('/api/auth/google', async (request, response) => {
-  if (!isGoogleConfigured()) return response.status(400).json({ error: 'Google sync is not set up yet.' })
+  if (!googleConfigured()) return response.status(400).json({ error: 'Google sync is not set up yet.' })
   const { randomBytes } = await import('node:crypto')
   const state = randomBytes(16).toString('hex')
-  response.cookie(OAUTH_STATE_COOKIE, state, { httpOnly: true, sameSite: 'lax', maxAge: 10 * 60 * 1000, path: '/' })
+  response.cookie(OAUTH_STATE_COOKIE, state, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 10 * 60 * 1000, path: '/' })
   response.json({ url: buildAuthUrl(process.env, redirectUriFor(process.env, request.headers.host), state) })
 })
 
@@ -143,9 +163,11 @@ app.get('/api/auth/google/callback', async (request, response, next) => {
     const redirectUri = redirectUriFor(process.env, request.headers.host)
     const tokens = await exchangeCode(process.env, code, redirectUri)
     const expiresAt = tokens.expires_in ? new Date(Date.now() + tokens.expires_in * 1000).toISOString() : null
+    const accessToken = encryptSecret(tokens.access_token)
+    const refreshToken = encryptSecret(tokens.refresh_token || null)
     await sql`
       INSERT INTO connected_accounts (user_id, provider, access_token, refresh_token, expires_at)
-      VALUES (${ownerIdFor(request)}, 'google', ${tokens.access_token}, ${tokens.refresh_token || null}, ${expiresAt})
+      VALUES (${ownerIdFor(request)}, 'google', ${accessToken}, ${refreshToken}, ${expiresAt})
       ON CONFLICT (user_id, provider) DO UPDATE SET
         access_token = EXCLUDED.access_token,
         refresh_token = COALESCE(EXCLUDED.refresh_token, connected_accounts.refresh_token),
@@ -179,18 +201,30 @@ app.delete('/api/auth/google', async (request, response, next) => {
 async function googleAccessToken(ownerId) {
   const [account] = await sql`SELECT access_token, refresh_token, expires_at FROM connected_accounts WHERE user_id = ${ownerId} AND provider = 'google'`
   if (!account) return null
-  if (account.refresh_token && (!account.expires_at || new Date(account.expires_at).getTime() < Date.now() + 60000)) {
-    const refreshed = await refreshAccessToken(process.env, account.refresh_token)
+  const accessToken = decryptSecret(account.access_token)
+  const refreshToken = decryptSecret(account.refresh_token)
+
+  // Transparently upgrade credentials created before encryption was enabled.
+  if (hasTokenEncryptionKey() && (!isEncryptedSecret(account.access_token) || (account.refresh_token && !isEncryptedSecret(account.refresh_token)))) {
+    await sql`
+      UPDATE connected_accounts
+      SET access_token = ${encryptSecret(accessToken)}, refresh_token = ${encryptSecret(refreshToken)}, updated_at = now()
+      WHERE user_id = ${ownerId} AND provider = 'google'
+    `
+  }
+
+  if (refreshToken && (!account.expires_at || new Date(account.expires_at).getTime() < Date.now() + 60000)) {
+    const refreshed = await refreshAccessToken(process.env, refreshToken)
     const expiresAt = refreshed.expires_in ? new Date(Date.now() + refreshed.expires_in * 1000).toISOString() : null
-    await sql`UPDATE connected_accounts SET access_token = ${refreshed.access_token}, expires_at = ${expiresAt}, updated_at = now() WHERE user_id = ${ownerId} AND provider = 'google'`
+    await sql`UPDATE connected_accounts SET access_token = ${encryptSecret(refreshed.access_token)}, expires_at = ${expiresAt}, updated_at = now() WHERE user_id = ${ownerId} AND provider = 'google'`
     return refreshed.access_token
   }
-  return account.access_token
+  return accessToken
 }
 
 app.get('/api/imports/google/preview', async (request, response, next) => {
   try {
-    if (!isGoogleConfigured()) return response.status(400).json({ error: 'Google sync is not set up yet.' })
+    if (!googleConfigured()) return response.status(400).json({ error: 'Google sync is not set up yet.' })
     const ownerId = ownerIdFor(request)
     const accessToken = await googleAccessToken(ownerId)
     if (!accessToken) return response.status(400).json({ error: 'Connect your Google account first.' })

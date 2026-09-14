@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { hashPassword, passwordMatches } from '../auth.js'
+import { hashPassword, passwordMatches, requireAuth } from '../auth.js'
 
 describe('password hashing (scrypt)', () => {
   it('accepts the correct password', async () => {
@@ -17,5 +17,27 @@ describe('password hashing (scrypt)', () => {
     const second = await hashPassword('same-password')
     expect(first.salt).not.toBe(second.salt)
     expect(first.hash).not.toBe(second.hash)
+  })
+})
+
+describe('private route guard', () => {
+  it('rejects a request without a signed-in user', () => {
+    const response = {
+      statusCode: null,
+      body: null,
+      status(code) { this.statusCode = code; return this },
+      json(body) { this.body = body; return this },
+    }
+    let continued = false
+    requireAuth({}, response, () => { continued = true })
+    expect(response.statusCode).toBe(401)
+    expect(response.body).toEqual({ error: 'Sign in to continue.' })
+    expect(continued).toBe(false)
+  })
+
+  it('allows a request with a signed-in user', () => {
+    let continued = false
+    requireAuth({ user: { id: 'user-1' } }, {}, () => { continued = true })
+    expect(continued).toBe(true)
   })
 })

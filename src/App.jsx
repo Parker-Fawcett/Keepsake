@@ -6,13 +6,11 @@ import {
   BookUser,
   BriefcaseBusiness,
   CalendarDays,
-  CakeSlice,
   Check,
   ChevronLeft,
   ChevronRight,
   ContactRound,
   FileUp,
-  Gift,
   Globe,
   Heart,
   Home,
@@ -20,81 +18,11 @@ import {
   Mic,
   Plus,
   Search,
-  Send,
   ShieldCheck,
   Sparkles,
-  Star,
   Users,
   X,
 } from 'lucide-react'
-
-const peopleSeed = [
-  {
-    id: 1,
-    name: 'Maya',
-    relationship: 'Partner',
-    initials: 'M',
-    color: '#d98e78',
-    birthday: 'March 12',
-    nextEvent: 'Interview today',
-    memory: 'Loves sunflowers and silver jewelry',
-    likes: ['Sunflowers', 'Thai food', 'Silver jewelry'],
-    dates: [
-      { label: 'Birthday', value: 'March 12' },
-      { label: 'Our anniversary', value: 'October 8' },
-    ],
-    notes: [
-      'Wants to visit Montreal someday.',
-      'Big interview this afternoon — ask how it went.',
-    ],
-  },
-  {
-    id: 2,
-    name: 'Mom',
-    relationship: 'Family',
-    initials: 'M',
-    color: '#86a798',
-    birthday: 'November 4',
-    nextEvent: 'Birthday in 6 weeks',
-    memory: 'Looking for a new pottery class',
-    likes: ['Pottery', 'Gardening', 'Mystery books'],
-    dates: [{ label: 'Birthday', value: 'November 4' }],
-    notes: ['Ask about the new rose bushes.', 'Gift idea: local pottery workshop.'],
-  },
-  {
-    id: 3,
-    name: 'Jake',
-    relationship: 'Friend',
-    initials: 'J',
-    color: '#8ea1b6',
-    birthday: 'January 19',
-    nextEvent: 'Moving next Saturday',
-    memory: 'Coffee at Atlas is his favorite',
-    likes: ['Trail running', 'Vinyl', 'Dark roast'],
-    dates: [{ label: 'Birthday', value: 'January 19' }],
-    notes: ['Offer to help with the move.', 'Send the playlist from our road trip.'],
-  },
-  {
-    id: 4,
-    name: 'Olivia',
-    relationship: 'Extended family',
-    initials: 'O',
-    color: '#b291a4',
-    birthday: 'July 27',
-    nextEvent: 'No upcoming events',
-    memory: "Maya's sister · studying architecture",
-    likes: ['Architecture', 'Matcha'],
-    dates: [{ label: 'Birthday', value: 'July 27' }],
-    notes: ['Graduates next spring.'],
-  },
-]
-
-const upcoming = [
-  { day: 'TODAY', date: '14', person: 'Maya', title: 'Interview day', meta: 'Follow up this evening', color: '#d98e78', icon: Star },
-  { day: 'SAT', date: '19', person: 'Jake', title: 'Moving day', meta: 'Offer to help · 9:00 AM', color: '#8ea1b6', icon: Home },
-  { day: 'OCT', date: '08', person: 'Maya', title: 'Your anniversary', meta: '24 days away', color: '#b291a4', icon: Heart },
-  { day: 'NOV', date: '04', person: 'Mom', title: "Mom's birthday", meta: 'Gift reminder set', color: '#86a798', icon: CakeSlice },
-]
 
 const tabs = [
   { id: 'today', label: 'Today', icon: Home },
@@ -339,15 +267,15 @@ function Header({ eyebrow, title, action }) {
   )
 }
 
-function AuthModal({ user, onClose, onAuth, onLogout, authError }) {
+function AuthModal({ user, onClose, onAuth, onLogout, authError, required = false }) {
   const [mode, setMode] = useState('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [displayName, setDisplayName] = useState('')
   return (
-    <div className="auth-overlay" onClick={onClose}>
+    <div className={`auth-overlay ${required ? 'auth-required' : ''}`} onClick={required ? undefined : onClose}>
       <div className="auth-sheet" onClick={e => e.stopPropagation()}>
-        <div className="section-heading"><div><p className="kicker">Your private account</p><h2>{user ? 'Signed in' : mode === 'login' ? 'Welcome back' : 'Create an account'}</h2></div><button className="icon-button" onClick={onClose} aria-label="Close"><X size={18} /></button></div>
+        <div className="section-heading"><div><p className="kicker">Your private account</p><h2>{user ? 'Signed in' : mode === 'login' ? 'Welcome back' : 'Create an account'}</h2></div>{!required && <button className="icon-button" onClick={onClose} aria-label="Close"><X size={18} /></button>}</div>
         {user
           ? <>
             <p className="intro">Signed in as {user.email || user.display_name}. Your notes and people save to your account on this device and server.</p>
@@ -367,13 +295,16 @@ function AuthModal({ user, onClose, onAuth, onLogout, authError }) {
   )
 }
 
-function Today({ onOpen, onAdd, user, onAccount, comingUp }) {
-  const teaser = comingUp && comingUp.length ? comingUp.slice(0, 2) : upcoming.slice(1, 3)
+function Today({ onOpen, onAdd, onShowPeople, user, onAccount, comingUp, people }) {
+  const teaser = comingUp?.slice(0, 2) || []
+  const firstEvent = teaser[0]
+  const firstName = String(user?.display_name || user?.email?.split('@')[0] || 'friend').split(' ')[0]
+  const todayLabel = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'long', year: 'numeric', weekday: 'long' }).format(new Date())
   return (
     <main className="page">
       <Header
-        eyebrow="14 September 2026 · Monday"
-        title={<>Today, <span>Parker</span></>}
+        eyebrow={todayLabel}
+        title={<>Today, <span>{firstName}</span></>}
         action={<div className="header-actions"><button className="icon-button" aria-label="Notifications"><Bell size={19} /></button><button className="icon-button" aria-label="Account" title={user ? `Signed in as ${user.email || user.display_name}` : 'Sign in'} onClick={onAccount}>{user ? String((user.display_name || user.email || 'P')[0]).toUpperCase() : <ContactRound size={19} />}</button></div>}
       />
 
@@ -381,13 +312,10 @@ function Today({ onOpen, onAdd, user, onAccount, comingUp }) {
         <div className="hero-orbit orbit-one" />
         <div className="hero-orbit orbit-two" />
         <div className="hero-icon"><Sparkles size={19} /></div>
-        <p className="kicker">Filed under · Maya</p>
-        <h2>Maya’s interview is today.</h2>
-        <p>From your note on September 8: she said she was nervous about the final round.</p>
-        <div className="hero-actions">
-          <button className="primary-button"><Send size={16} /> Text Maya</button>
-          <button className="text-button">Move to tonight</button>
-        </div>
+        <p className="kicker">{firstEvent ? `Coming up · ${firstEvent.person}` : 'Your circle is quiet'}</p>
+        <h2>{firstEvent?.title || 'Nothing needs your attention today.'}</h2>
+        <p>{firstEvent?.meta || 'Add a person or paste a messy note. Keepsake will surface the moments worth remembering.'}</p>
+        {!firstEvent && <div className="hero-actions"><button className="primary-button" onClick={onAdd}><Plus size={16} /> Add a memory</button></div>}
       </section>
 
       <section className="section">
@@ -396,19 +324,20 @@ function Today({ onOpen, onAdd, user, onAccount, comingUp }) {
             <p className="kicker">Your people</p>
             <h2>On today’s page</h2>
           </div>
-          <button className="link-button">See all <ChevronRight size={15} /></button>
+          <button className="link-button" onClick={onShowPeople}>See all <ChevronRight size={15} /></button>
         </div>
         <div className="people-row">
-          {peopleSeed.slice(0, 3).map((person, index) => (
+          {people.slice(0, 3).map((person, index) => (
             <button className="person-tile" key={person.id} onClick={() => onOpen(person)}>
               <div className="avatar-wrap">
                 <Avatar person={person} size="lg" />
                 {index === 0 && <span className="status-dot" />}
               </div>
               <strong>{person.name}</strong>
-              <span>{index === 0 ? 'Interview today' : index === 1 ? 'Call this week' : 'Moving soon'}</span>
+              <span>{person.nextEvent || 'Nothing scheduled yet'}</span>
             </button>
           ))}
+          {!people.length && <button className="empty-inline" onClick={onShowPeople}><Plus size={16} /> Add the first person in your circle</button>}
         </div>
       </section>
 
@@ -421,6 +350,7 @@ function Today({ onOpen, onAdd, user, onAccount, comingUp }) {
         </div>
         <div className="event-list compact">
           {teaser.map((event) => <EventRow event={event} key={`${event.title}-${event.date}-${event.person}`} />)}
+          {!teaser.length && <div className="empty-state"><CalendarDays size={20} /><strong>No upcoming moments yet</strong><span>Dates you confirm from notes will appear here automatically.</span></div>}
         </div>
       </section>
 
@@ -445,19 +375,23 @@ function EventRow({ event }) {
   )
 }
 
-function useUpcomingReminders() {
+function useUpcomingReminders(enabled) {
   const [events, setEvents] = useState(null)
   useEffect(() => {
+    if (!enabled) {
+      setEvents(null)
+      return
+    }
     fetch('/api/reminders/upcoming?limit=20')
       .then(response => response.ok ? response.json() : Promise.reject(new Error('offline')))
       .then(({ reminders }) => setEvents((reminders || []).map(mapReminderToEvent)))
       .catch(() => setEvents(null))
-  }, [])
+  }, [enabled])
   return events
 }
 
 function Upcoming({ events }) {
-  const moments = events && events.length ? events : upcoming
+  const moments = events || []
   return (
     <main className="page">
       <Header eyebrow="Your relationship calendar" title="Upcoming" action={<button className="icon-button"><CalendarDays size={19} /></button>} />
@@ -468,7 +402,7 @@ function Upcoming({ events }) {
       </div>
       <section className="section">
         <div className="section-heading"><div><p className="kicker">Next in your circle</p><h2>Moments ahead</h2></div></div>
-        <div className="event-list">{moments.map(event => <EventRow event={event} key={`${event.title}-${event.date}-${event.person}`} />)}</div>
+        <div className="event-list">{moments.map(event => <EventRow event={event} key={`${event.title}-${event.date}-${event.person}`} />)}{!moments.length && <div className="empty-state"><CalendarDays size={20} /><strong>No reminders scheduled</strong><span>Confirmed birthdays, anniversaries, and events will collect here.</span></div>}</div>
       </section>
     </main>
   )
@@ -492,6 +426,7 @@ function Relationships({ people, onOpen, onCreate }) {
             <div className="next-pill"><CalendarDays size={14} /> {person.nextEvent}</div>
           </button>
         ))}
+        {!results.length && <button className="empty-state empty-card" onClick={onCreate}><Plus size={20} /><strong>{query ? 'No people match that search' : 'Your circle is empty'}</strong><span>{query ? 'Try another name or relationship.' : 'Add someone, then Keepsake can start remembering with you.'}</span></button>}
       </div>
     </main>
   )
@@ -505,19 +440,15 @@ function formatStoredDate(date) {
 }
 
 function PersonDetail({ person, onBack }) {
-  // Seed cards (numeric ids) are static demo content; stored people load
-  // their confirmed facts, dates, and memories from the API.
-  const isSeed = typeof person.id === 'number'
   const [note, setNote] = useState('')
   const [localNotes, setLocalNotes] = useState([])
   const [live, setLive] = useState(null)
   useEffect(() => {
-    if (isSeed) return
     fetch(`/api/people/${person.id}/details`)
       .then(response => response.ok ? response.json() : Promise.reject(new Error('offline')))
       .then(setLive)
       .catch(() => {})
-  }, [person.id, isSeed])
+  }, [person.id])
   const addNote = () => {
     if (!note.trim()) return
     setLocalNotes(prev => [note.trim(), ...prev])
@@ -651,7 +582,7 @@ function AddMemory({ people, onSaved, onImported }) {
         </article>
         {dateRows.map(date => <article className="review-card" key={date}><div className="review-check"><Check size={15} /></div><div className="review-symbol"><CalendarDays size={18} /></div><div><small>Possible date</small><strong>{date}</strong><span>Suggest a reminder</span></div></article>)}
       </section>
-      <button className="primary-button wide sticky-save" onClick={() => { const savedText = text; setText(''); setReview(false); setPreview(null); setPreviewState('idle'); onSaved(savedText) }}><Sparkles size={17} /> Add to Keepsake</button>
+      <button className="primary-button wide sticky-save" onClick={() => { const savedText = text; const savedExtraction = preview; setText(''); setReview(false); setPreview(null); setPreviewState('idle'); onSaved(savedText, savedExtraction) }}><Sparkles size={17} /> Add to Keepsake</button>
     </main>
     )
   }
@@ -682,14 +613,15 @@ function AddMemory({ people, onSaved, onImported }) {
 export default function App() {
   const [onboarding, setOnboarding] = useState(() => localStorage.getItem('keepsake-onboarded-v2') !== 'true')
   const [tab, setTab] = useState('today')
-  const [people, setPeople] = useState(peopleSeed)
+  const [people, setPeople] = useState([])
   const [selected, setSelected] = useState(null)
   const [creating, setCreating] = useState(false)
   const [toast, setToast] = useState('')
   const [user, setUser] = useState(null)
+  const [authReady, setAuthReady] = useState(false)
   const [accountOpen, setAccountOpen] = useState(false)
   const [authError, setAuthError] = useState('')
-  const liveEvents = useUpcomingReminders()
+  const liveEvents = useUpcomingReminders(Boolean(user))
 
   const showToast = message => {
     setToast(message)
@@ -700,7 +632,8 @@ export default function App() {
     fetch('/api/auth/me')
       .then(response => response.ok ? response.json() : Promise.reject(new Error('offline')))
       .then(({ user: me }) => setUser(me))
-      .catch(() => {})
+      .catch(() => setUser(null))
+      .finally(() => setAuthReady(true))
   }
 
   const handleAuth = async (mode, fields) => {
@@ -724,18 +657,21 @@ export default function App() {
   const handleLogout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {})
     setUser(null)
+    setPeople([])
     setAccountOpen(false)
     showToast('Signed out on this device')
   }
 
   useEffect(() => {
     refreshMe()
+  }, [])
+
+  useEffect(() => {
+    if (!user) return
     fetch('/api/people')
       .then(response => response.ok ? response.json() : Promise.reject(new Error('Could not load people')))
       .then(({ people: savedPeople }) => {
-        if (!savedPeople?.length) return
-        // A real circle replaces the demo cards instead of mixing with them.
-        const hydrated = savedPeople.map(person => ({
+        const hydrated = (savedPeople || []).map(person => ({
           ...person,
           initials: person.name[0].toUpperCase(),
           nextEvent: 'Nothing scheduled yet',
@@ -747,7 +683,7 @@ export default function App() {
         setPeople(hydrated)
       })
       .catch(() => showToast('Working offline — changes may not sync'))
-  }, [])
+  }, [user])
 
   const addPerson = async (name, relationship) => {
     try {
@@ -758,7 +694,7 @@ export default function App() {
       })
       if (!response.ok) throw new Error('Could not save person')
       const { person } = await response.json()
-      setPeople(prev => [...prev.filter(entry => typeof entry.id === 'string'), { ...person, initials: name[0].toUpperCase(), nextEvent: 'Nothing scheduled yet', memory: 'A new person in your circle', likes: [], dates: [], notes: [] }])
+      setPeople(prev => [...prev, { ...person, initials: name[0].toUpperCase(), nextEvent: 'Nothing scheduled yet', memory: 'A new person in your circle', likes: [], dates: [], notes: [] }])
       setCreating(false)
       showToast(`${name} was added to your circle`)
     } catch {
@@ -783,7 +719,7 @@ export default function App() {
     }
   }
 
-  const saveNote = async rawText => {
+  const saveNote = async (rawText, reviewedExtraction = null) => {
     try {
       const response = await fetch('/api/notes', {
         method: 'POST',
@@ -791,12 +727,37 @@ export default function App() {
         body: JSON.stringify({ rawText, source: 'manual' }),
       })
       if (!response.ok) throw new Error('Could not save note')
+      const payload = await response.json()
+      const extraction = reviewedExtraction || payload.extraction
+      if (extraction && payload.note?.id) {
+        const peoplePayload = extraction.people.map(entry => {
+          const match = people.find(person => person.name.toLowerCase() === String(entry.name || '').toLowerCase())
+          return { name: entry.name, relationship: entry.relationship, personId: match?.id, confidence: entry.confidence }
+        })
+        const facts = extraction.people.flatMap((entry, person) => (entry.facts || []).map(fact => ({ person, ...fact })))
+        const dates = extraction.people.flatMap((entry, person) => (entry.dates || []).map(date => ({ person, ...date })))
+        const confirm = await fetch(`/api/notes/${payload.note.id}/confirm`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ people: peoplePayload, facts, dates }),
+        })
+        if (!confirm.ok) throw new Error('Could not confirm note')
+      }
       setTab('today')
       showToast('Your note is safely stored')
     } catch {
       showToast('Could not save that note yet')
     }
   }
+
+  if (!authReady) return <div className="app-shell auth-loading"><div className="auth-loading-mark"><Heart size={20} fill="currentColor" /></div><span>Opening your Keepsake…</span></div>
+
+  if (!user) return (
+    <div className="app-shell auth-gate">
+      <div className="brand-rail"><div className="brand-mark"><Heart size={18} fill="currentColor" /></div><span>Keepsake</span></div>
+      <AuthModal required user={null} authError={authError} onAuth={handleAuth} />
+    </div>
+  )
 
   if (onboarding) return (
     <div className="app-shell onboarding-shell">
@@ -811,7 +772,7 @@ export default function App() {
   let content
   if (selected) content = <PersonDetail person={selected} onBack={() => setSelected(null)} />
   else if (creating) content = <AddPerson onCancel={() => setCreating(false)} onSave={addPerson} />
-  else if (tab === 'today') content = <Today onOpen={setSelected} onAdd={() => setTab('add')} user={user} onAccount={() => { setAuthError(''); setAccountOpen(true) }} comingUp={liveEvents} />
+  else if (tab === 'today') content = <Today onOpen={setSelected} onAdd={() => setTab('add')} onShowPeople={() => setTab('relationships')} user={user} onAccount={() => { setAuthError(''); setAccountOpen(true) }} comingUp={liveEvents} people={people} />
   else if (tab === 'upcoming') content = <Upcoming events={liveEvents} />
   else if (tab === 'relationships') content = <Relationships people={people} onOpen={setSelected} onCreate={() => setCreating(true)} />
   else content = <AddMemory people={people} onImported={handleImport} onSaved={saveNote} />

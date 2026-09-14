@@ -73,7 +73,6 @@ async function deliverDueReminders() {
   return { delivered, sessionsCleared: expired.length }
 }
 
-// The demo owner has no login; its reminders still deliver through the log.
 import { fileURLToPath } from 'node:url'
 
 export { deliverDueReminders }
