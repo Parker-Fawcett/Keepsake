@@ -221,8 +221,8 @@ function Today({ onOpen, onAdd }) {
   return (
     <main className="page">
       <Header
-        eyebrow="Monday, September 14"
-        title={<>Good morning, <span>Parker.</span></>}
+        eyebrow="14 September 2026 · Monday"
+        title={<>Today, <span>Parker</span></>}
         action={<button className="icon-button" aria-label="Notifications"><Bell size={19} /></button>}
       />
 
@@ -230,20 +230,20 @@ function Today({ onOpen, onAdd }) {
         <div className="hero-orbit orbit-one" />
         <div className="hero-orbit orbit-two" />
         <div className="hero-icon"><Sparkles size={19} /></div>
-        <p className="kicker">A gentle nudge</p>
-        <h2>Maya has her big interview today.</h2>
-        <p>You made a note that she was nervous. A little encouragement might mean a lot.</p>
+        <p className="kicker">Filed under · Maya</p>
+        <h2>Maya’s interview is today.</h2>
+        <p>From your note on September 8: she said she was nervous about the final round.</p>
         <div className="hero-actions">
-          <button className="primary-button"><Send size={16} /> Send a message</button>
-          <button className="text-button">Remind me tonight</button>
+          <button className="primary-button"><Send size={16} /> Text Maya</button>
+          <button className="text-button">Move to tonight</button>
         </div>
       </section>
 
       <section className="section">
         <div className="section-heading">
           <div>
-            <p className="kicker">Your circle</p>
-            <h2>People who matter today</h2>
+            <p className="kicker">Your people</p>
+            <h2>On today’s page</h2>
           </div>
           <button className="link-button">See all <ChevronRight size={15} /></button>
         </div>
@@ -264,8 +264,8 @@ function Today({ onOpen, onAdd }) {
       <section className="section">
         <div className="section-heading">
           <div>
-            <p className="kicker">Coming up</p>
-            <h2>Worth remembering</h2>
+            <p className="kicker">The next few pages</p>
+            <h2>Coming up</h2>
           </div>
         </div>
         <div className="event-list compact">
