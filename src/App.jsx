@@ -31,6 +31,12 @@ const tabs = [
   { id: 'add', label: 'Add', icon: Plus },
 ]
 
+function applicationServerKey(value) {
+  const padding = '='.repeat((4 - value.length % 4) % 4)
+  const base64 = (value + padding).replace(/-/g, '+').replace(/_/g, '/')
+  return Uint8Array.from(atob(base64), character => character.charCodeAt(0))
+}
+
 const importSources = [
   { id: 'contacts', name: 'Phone contacts', detail: 'Names, photos, birthdays and numbers', icon: ContactRound, tone: 'sage' },
   { id: 'google', name: 'Google contacts', detail: 'Sync the Google account you choose', icon: Globe, tone: 'blue' },
@@ -295,7 +301,7 @@ function AuthModal({ user, onClose, onAuth, onLogout, authError, required = fals
   )
 }
 
-function Today({ onOpen, onAdd, onShowPeople, user, onAccount, comingUp, people }) {
+function Today({ onOpen, onAdd, onShowPeople, user, onAccount, comingUp, people, notificationState, onNotifications }) {
   const teaser = comingUp?.slice(0, 2) || []
   const firstEvent = teaser[0]
   const firstName = String(user?.display_name || user?.email?.split('@')[0] || 'friend').split(' ')[0]
@@ -305,7 +311,7 @@ function Today({ onOpen, onAdd, onShowPeople, user, onAccount, comingUp, people 
       <Header
         eyebrow={todayLabel}
         title={<>Today, <span>{firstName}</span></>}
-        action={<div className="header-actions"><button className="icon-button" aria-label="Notifications"><Bell size={19} /></button><button className="icon-button" aria-label="Account" title={user ? `Signed in as ${user.email || user.display_name}` : 'Sign in'} onClick={onAccount}>{user ? String((user.display_name || user.email || 'P')[0]).toUpperCase() : <ContactRound size={19} />}</button></div>}
+        action={<div className="header-actions"><button className={`icon-button ${notificationState === 'enabled' ? 'notification-enabled' : ''}`} aria-label={notificationState === 'enabled' ? 'Notifications enabled' : 'Enable notifications'} title={notificationState === 'enabled' ? 'Notifications are enabled' : 'Enable free browser notifications'} disabled={notificationState === 'enabling'} onClick={onNotifications}><Bell size={19} /></button><button className="icon-button" aria-label="Account" title={user ? `Signed in as ${user.email || user.display_name}` : 'Sign in'} onClick={onAccount}>{user ? String((user.display_name || user.email || 'P')[0]).toUpperCase() : <ContactRound size={19} />}</button></div>}
       />
 
       <section className="hero-card">
@@ -621,6 +627,7 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false)
   const [accountOpen, setAccountOpen] = useState(false)
   const [authError, setAuthError] = useState('')
+  const [notificationState, setNotificationState] = useState('idle')
   const liveEvents = useUpcomingReminders(Boolean(user))
 
   const showToast = message => {
@@ -655,9 +662,23 @@ export default function App() {
   }
 
   const handleLogout = async () => {
+    try {
+      const registration = await navigator.serviceWorker?.getRegistration()
+      const subscription = await registration?.pushManager.getSubscription()
+      if (subscription) {
+        await fetch('/api/push-tokens', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: JSON.stringify(subscription) }),
+        })
+      }
+    } catch {
+      // Signing out should still succeed if notification cleanup is offline.
+    }
     await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {})
     setUser(null)
     setPeople([])
+    setNotificationState('idle')
     setAccountOpen(false)
     showToast('Signed out on this device')
   }
@@ -684,6 +705,51 @@ export default function App() {
       })
       .catch(() => showToast('Working offline — changes may not sync'))
   }, [user])
+
+  useEffect(() => {
+    if (!user || !('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return
+    if (Notification.permission !== 'granted') return
+    navigator.serviceWorker.register('/sw.js')
+      .then(registration => registration.pushManager.getSubscription())
+      .then(subscription => setNotificationState(subscription ? 'enabled' : 'idle'))
+      .catch(() => setNotificationState('idle'))
+  }, [user])
+
+  const enableNotifications = async () => {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+      showToast('This browser does not support notifications')
+      return
+    }
+    if (Notification.permission === 'denied') {
+      showToast('Notifications are blocked in your browser settings')
+      return
+    }
+    setNotificationState('enabling')
+    try {
+      const keyResponse = await fetch('/api/push/public-key')
+      const keyPayload = await keyResponse.json()
+      if (!keyResponse.ok) throw new Error(keyPayload.error || 'Notifications are not configured yet')
+      const registration = await navigator.serviceWorker.register('/sw.js')
+      const permission = await Notification.requestPermission()
+      if (permission !== 'granted') throw new Error('Notification permission was not granted')
+      const existing = await registration.pushManager.getSubscription()
+      const subscription = existing || await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: applicationServerKey(keyPayload.publicKey),
+      })
+      const saveResponse = await fetch('/api/push-tokens', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: JSON.stringify(subscription), platform: 'web' }),
+      })
+      if (!saveResponse.ok) throw new Error('Could not save this browser')
+      setNotificationState('enabled')
+      showToast('Notifications are on for this browser')
+    } catch (error) {
+      setNotificationState('idle')
+      showToast(error.message || 'Could not enable notifications')
+    }
+  }
 
   const addPerson = async (name, relationship) => {
     try {
@@ -772,7 +838,7 @@ export default function App() {
   let content
   if (selected) content = <PersonDetail person={selected} onBack={() => setSelected(null)} />
   else if (creating) content = <AddPerson onCancel={() => setCreating(false)} onSave={addPerson} />
-  else if (tab === 'today') content = <Today onOpen={setSelected} onAdd={() => setTab('add')} onShowPeople={() => setTab('relationships')} user={user} onAccount={() => { setAuthError(''); setAccountOpen(true) }} comingUp={liveEvents} people={people} />
+  else if (tab === 'today') content = <Today onOpen={setSelected} onAdd={() => setTab('add')} onShowPeople={() => setTab('relationships')} user={user} onAccount={() => { setAuthError(''); setAccountOpen(true) }} comingUp={liveEvents} people={people} notificationState={notificationState} onNotifications={enableNotifications} />
   else if (tab === 'upcoming') content = <Upcoming events={liveEvents} />
   else if (tab === 'relationships') content = <Relationships people={people} onOpen={setSelected} onCreate={() => setCreating(true)} />
   else content = <AddMemory people={people} onImported={handleImport} onSaved={saveNote} />

@@ -20,5 +20,7 @@ services:
         sync: false
       - key: TOKEN_ENCRYPTION_KEY
         generateValue: true
+      - key: VAPID_PUBLIC_KEY
+        sync: false
       - key: KEEPSAKE_WEBHOOK_URL
         sync: false

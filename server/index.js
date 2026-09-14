@@ -109,12 +109,31 @@ app.post('/api/auth/logout', async (request, response, next) => {
 // must have a valid session; there is no shared fallback account.
 app.use('/api', requireAuth)
 
+app.get('/api/push/public-key', (_request, response) => {
+  const publicKey = String(process.env.VAPID_PUBLIC_KEY || '').trim()
+  if (!publicKey) return response.status(503).json({ error: 'Browser notifications are not configured yet.' })
+  response.json({ publicKey })
+})
+
 app.post('/api/push-tokens', async (request, response, next) => {
   try {
     const token = String(request.body?.token || '').trim()
     const platform = String(request.body?.platform || '').trim()
     if (!isValidPushToken(token)) return response.status(400).json({ error: 'Enter a valid device token.' })
     if (!isValidPushPlatform(platform)) return response.status(400).json({ error: 'Enter a valid platform.' })
+    if (platform === 'web') {
+      try {
+        const subscription = JSON.parse(token)
+        if (!subscription?.endpoint || !subscription?.keys?.p256dh || !subscription?.keys?.auth) {
+          return response.status(400).json({ error: 'Enter a valid browser notification subscription.' })
+        }
+      } catch {
+        return response.status(400).json({ error: 'Enter a valid browser notification subscription.' })
+      }
+    }
+    // A browser subscription belongs to the account currently using that
+    // browser. Reassigning it prevents reminders from a signed-out account.
+    await sql`DELETE FROM device_tokens WHERE token = ${token} AND user_id <> ${ownerIdFor(request)}`
     const [saved] = await sql`
       INSERT INTO device_tokens (user_id, token, platform)
       VALUES (${ownerIdFor(request)}, ${token}, ${platform})

@@ -68,10 +68,10 @@ describe('input validators', () => {
     expect(isValidOptionalPhone('1'.repeat(16))).toBe(false)
   })
 
-  it('requires push tokens between 1 and 512 characters', () => {
+  it('requires push tokens between 1 and 4096 characters', () => {
     expect(isValidPushToken('')).toBe(false)
     expect(isValidPushToken('ExponentPushToken[abc123]')).toBe(true)
-    expect(isValidPushToken('x'.repeat(513))).toBe(false)
+    expect(isValidPushToken('x'.repeat(4097))).toBe(false)
   })
 
   it('only accepts known push platforms', () => {

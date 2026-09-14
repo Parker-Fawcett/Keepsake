@@ -41,7 +41,7 @@ export function isValidOptionalPhone(phone) {
 
 export function isValidPushToken(token) {
   const trimmed = String(token || '').trim()
-  return trimmed.length >= 1 && trimmed.length <= 512
+  return trimmed.length >= 1 && trimmed.length <= 4096
 }
 
 export function isValidPushPlatform(platform) {

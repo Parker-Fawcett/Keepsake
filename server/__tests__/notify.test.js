@@ -9,7 +9,7 @@ describe('reminder delivery', () => {
 
   it('refuses to report log-only delivery in production', async () => {
     await expect(sendNotification({ title: 'Birthday', body: 'Maya' }, { NODE_ENV: 'production' }))
-      .rejects.toThrow(/KEEPSAKE_WEBHOOK_URL/)
+      .rejects.toThrow(/No browser subscription/)
   })
 
   it('keeps log delivery available for local development', async () => {

@@ -28,12 +28,18 @@ async function deliverDueReminders() {
   for (const reminder of due) {
     const tokens = await sql`SELECT token FROM device_tokens WHERE user_id = ${reminder.owner_id}`
     try {
-      await sendNotification({
+      const result = await sendNotification({
         title: reminder.title,
         body: reminder.date_label ? `${reminder.date_label} for ${reminder.person_name || 'someone'}` : reminder.title,
         tokens: tokens.map(row => row.token),
       })
+      if (result.expiredTokens?.length) {
+        await sql`DELETE FROM device_tokens WHERE user_id = ${reminder.owner_id} AND token = ANY(${result.expiredTokens})`
+      }
     } catch (error) {
+      if (error.expiredTokens?.length) {
+        await sql`DELETE FROM device_tokens WHERE user_id = ${reminder.owner_id} AND token = ANY(${error.expiredTokens})`
+      }
       console.error(`[worker] delivery failed for reminder ${reminder.id}:`, error.message)
       continue
     }
@@ -63,6 +69,7 @@ async function deliverDueReminders() {
           await sql`
             INSERT INTO reminders (owner_id, person_id, important_date_id, title, remind_at)
             VALUES (${reminder.owner_id}, ${reminder.person_id}, ${reminder.important_date_id}, ${item.title}, ${item.remindAt.toISOString()})
+            ON CONFLICT DO NOTHING
           `
         }
       }

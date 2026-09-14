@@ -29,4 +29,7 @@ jobs:
         env:
           NODE_ENV: production
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          VAPID_SUBJECT: https://keepsake-yz0k.onrender.com
           KEEPSAKE_WEBHOOK_URL: ${{ secrets.KEEPSAKE_WEBHOOK_URL }}

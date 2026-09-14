@@ -34,6 +34,7 @@ button { color: inherit; }
 .eyebrow, .kicker { font-family: var(--mono); text-transform: uppercase; letter-spacing: .65px; font-size: 9px; font-weight: 500; color: var(--muted); margin: 0; }
 .icon-button, .round-add { width: 38px; height: 38px; flex: 0 0 auto; border: 1px solid var(--ink); background: transparent; display: grid; place-items: center; cursor: pointer; box-shadow: 3px 3px 0 #d9d2c5; }
 .icon-button:active, .round-add:active { transform: translate(2px,2px); box-shadow: 1px 1px 0 #d9d2c5; }
+.icon-button.notification-enabled { background: var(--forest); color: white; box-shadow: 3px 3px 0 #bfc9c1; }
 .round-add { background: var(--forest); color: white; border-color: var(--forest); }
 
 /* A daily correspondence card, not a dashboard hero. */
