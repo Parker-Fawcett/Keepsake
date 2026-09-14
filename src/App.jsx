@@ -217,13 +217,42 @@ function Header({ eyebrow, title, action }) {
   )
 }
 
-function Today({ onOpen, onAdd }) {
+function AuthModal({ user, onClose, onAuth, onLogout, authError }) {
+  const [mode, setMode] = useState('login')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [displayName, setDisplayName] = useState('')
+  return (
+    <div className="auth-overlay" onClick={onClose}>
+      <div className="auth-sheet" onClick={e => e.stopPropagation()}>
+        <div className="section-heading"><div><p className="kicker">Your private account</p><h2>{user ? 'Signed in' : mode === 'login' ? 'Welcome back' : 'Create an account'}</h2></div><button className="icon-button" onClick={onClose} aria-label="Close"><X size={18} /></button></div>
+        {user
+          ? <>
+            <p className="intro">Signed in as {user.email || user.display_name}. Your notes and people save to your account on this device and server.</p>
+            <button className="primary-button wide" onClick={onLogout}>Sign out</button>
+          </>
+          : <>
+            <p className="intro">One account keeps your circle in sync. Nothing here is shared or scraped.</p>
+            {mode === 'signup' && <label className="auth-field"><span>Name</span><input value={displayName} onChange={e => setDisplayName(e.target.value)} placeholder="What should we call you?" /></label>}
+            <label className="auth-field"><span>Email</span><input type="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" /></label>
+            <label className="auth-field"><span>Password</span><input type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} value={password} onChange={e => setPassword(e.target.value)} placeholder="8+ characters" /></label>
+            {authError && <p className="auth-error">{authError}</p>}
+            <button className="primary-button wide" disabled={!email.trim() || password.length < 8} onClick={() => onAuth(mode, { email: email.trim(), password, displayName: displayName.trim() })}>{mode === 'login' ? 'Sign in' : 'Create account'}</button>
+            <button className="text-button auth-switch" onClick={() => setMode(mode === 'login' ? 'signup' : 'login')}>{mode === 'login' ? 'New here? Create an account' : 'Already have one? Sign in'}</button>
+          </>}
+      </div>
+    </div>
+  )
+}
+
+function Today({ onOpen, onAdd, user, onAccount, comingUp }) {
+  const teaser = comingUp && comingUp.length ? comingUp.slice(0, 2) : upcoming.slice(1, 3)
   return (
     <main className="page">
       <Header
         eyebrow="14 September 2026 · Monday"
         title={<>Today, <span>Parker</span></>}
-        action={<button className="icon-button" aria-label="Notifications"><Bell size={19} /></button>}
+        action={<div className="header-actions"><button className="icon-button" aria-label="Notifications"><Bell size={19} /></button><button className="icon-button" aria-label="Account" title={user ? `Signed in as ${user.email || user.display_name}` : 'Sign in'} onClick={onAccount}>{user ? String((user.display_name || user.email || 'P')[0]).toUpperCase() : <ContactRound size={19} />}</button></div>}
       />
 
       <section className="hero-card">
@@ -269,7 +298,7 @@ function Today({ onOpen, onAdd }) {
           </div>
         </div>
         <div className="event-list compact">
-          {upcoming.slice(1, 3).map((event) => <EventRow event={event} key={event.title} />)}
+          {teaser.map((event) => <EventRow event={event} key={`${event.title}-${event.date}-${event.person}`} />)}
         </div>
       </section>
 
@@ -294,7 +323,64 @@ function EventRow({ event }) {
   )
 }
 
-function Upcoming() {
+const reminderPalette = ['#d98e78', '#8ea1b6', '#b291a4', '#86a798']
+
+function colorForName(name) {
+  let hash = 0
+  for (const char of String(name || '')) hash = (hash * 31 + char.charCodeAt(0)) >>> 0
+  return reminderPalette[hash % reminderPalette.length]
+}
+
+function iconForReminder(title, dateLabel) {
+  const text = `${title || ''} ${dateLabel || ''}`.toLowerCase()
+  if (text.includes('birthday')) return CakeSlice
+  if (text.includes('annivers')) return Heart
+  if (text.includes('interview')) return Star
+  if (text.includes('moving') || text.includes('home')) return Home
+  if (text.includes('gift')) return Gift
+  return CalendarDays
+}
+
+function dayLabelFor(date) {
+  const startOfToday = new Date()
+  startOfToday.setHours(0, 0, 0, 0)
+  const startOfDate = new Date(date)
+  startOfDate.setHours(0, 0, 0, 0)
+  const diffDays = Math.round((startOfDate - startOfToday) / (24 * 60 * 60 * 1000))
+  if (diffDays <= 0) return 'TODAY'
+  if (diffDays === 1) return 'TOMOR'
+  return ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'][startOfDate.getDay()]
+}
+
+function mapReminderToEvent(reminder) {
+  const at = new Date(reminder.remind_at)
+  const person = reminder.person_name || 'Someone'
+  return {
+    day: dayLabelFor(at),
+    date: String(at.getDate()).padStart(2, '0'),
+    person,
+    title: reminder.title,
+    meta: `${reminder.date_label || 'Reminder'} · ${at.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`,
+    color: colorForName(person),
+    icon: iconForReminder(reminder.title, reminder.date_label),
+  }
+}
+
+// Live scheduled reminders. Returns null while loading or offline, so
+// callers fall back to the built-in content instead of flashing empty.
+function useUpcomingReminders() {
+  const [events, setEvents] = useState(null)
+  useEffect(() => {
+    fetch('/api/reminders/upcoming?limit=20')
+      .then(response => response.ok ? response.json() : Promise.reject(new Error('offline')))
+      .then(({ reminders }) => setEvents((reminders || []).map(mapReminderToEvent)))
+      .catch(() => setEvents(null))
+  }, [])
+  return events
+}
+
+function Upcoming({ events }) {
+  const moments = events && events.length ? events : upcoming
   return (
     <main className="page">
       <Header eyebrow="Your relationship calendar" title="Upcoming" action={<button className="icon-button"><CalendarDays size={19} /></button>} />
@@ -305,7 +391,7 @@ function Upcoming() {
       </div>
       <section className="section">
         <div className="section-heading"><div><p className="kicker">Next in your circle</p><h2>Moments ahead</h2></div></div>
-        <div className="event-list">{upcoming.map(event => <EventRow event={event} key={event.title} />)}</div>
+        <div className="event-list">{moments.map(event => <EventRow event={event} key={`${event.title}-${event.date}-${event.person}`} />)}</div>
       </section>
     </main>
   )
@@ -388,6 +474,8 @@ function AddMemory({ people, onSaved, onImported }) {
   const [text, setText] = useState('')
   const [listening, setListening] = useState(false)
   const [review, setReview] = useState(false)
+  const [preview, setPreview] = useState(null)
+  const [previewState, setPreviewState] = useState('idle')
 
   const detected = useMemo(() => {
     const lower = text.toLowerCase()
@@ -395,6 +483,23 @@ function AddMemory({ people, onSaved, onImported }) {
     const dateMatch = text.match(/(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}|next\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)/i)
     return { known, date: dateMatch?.[0] }
   }, [text, people])
+
+  const openReview = () => {
+    setReview(true)
+    setPreview(null)
+    setPreviewState('loading')
+    fetch('/api/extract/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rawText: text }),
+    })
+      .then(response => response.ok ? response.json() : Promise.reject(new Error('preview failed')))
+      .then(({ extraction }) => {
+        setPreview(extraction)
+        setPreviewState('ready')
+      })
+      .catch(() => setPreviewState('offline'))
+  }
 
   const listen = () => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
@@ -410,26 +515,46 @@ function AddMemory({ people, onSaved, onImported }) {
     recognition.start()
   }
 
-  if (review) return (
+  if (review) {
+    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+    const previewPeople = previewState === 'ready' && preview ? (preview.people || []) : null
+    const reviewPeople = previewPeople && previewPeople.length
+      ? previewPeople.map(entry => {
+        const match = people.find(p => p.name.toLowerCase() === String(entry.name || '').toLowerCase())
+        const detailBits = [...(entry.facts || []).map(f => f.value), ...(entry.dates || []).map(d => `${d.label} · ${monthNames[(d.month || 1) - 1]} ${d.day}`)]
+        return {
+          name: entry.name,
+          relationship: match?.relationship || entry.relationship || 'Needs your review',
+          color: match?.color || '#b291a4',
+          initials: match?.initials || String(entry.name || '?')[0].toUpperCase(),
+          sub: detailBits.slice(0, 2).join(' · ') || (match ? match.memory : 'New name from this note'),
+        }
+      })
+      : (detected.known.length ? detected.known.map(p => ({ ...p, sub: p.relationship })) : [{ name: 'New person', relationship: 'Needs your review', color: '#b291a4', initials: '?', sub: 'No familiar names found' }])
+    const previewDates = previewState === 'ready' && preview ? (preview.people || []).flatMap(entry => (entry.dates || []).map(d => `${entry.name} · ${d.label} · ${monthNames[(d.month || 1) - 1]} ${d.day}`)) : []
+    const dateRows = previewDates.length ? previewDates : (detected.date ? [detected.date] : [])
+    return (
     <main className="page">
       <Header eyebrow="One last look" title="Here’s what I found" action={<button className="icon-button" onClick={() => setReview(false)}><X size={19} /></button>} />
       <div className="review-source"><span>Original note</span><p>{text}</p></div>
+      {previewState === 'loading' && <div className="detection-hint"><Sparkles size={16} /><span>Reading your note against your circle…</span></div>}
       <section className="review-list">
-        {(detected.known.length ? detected.known : [{ name: 'New person', relationship: 'Needs your review', color: '#b291a4', initials: '?' }]).map(person => (
+        {reviewPeople.map(person => (
           <article className="review-card" key={person.name}>
             <div className="review-check"><Check size={15} /></div><Avatar person={person} />
-            <div><small>Person</small><strong>{person.name}</strong><span>{person.relationship}</span></div>
+            <div><small>Person</small><strong>{person.name}</strong><span>{person.sub}</span></div>
           </article>
         ))}
         <article className="review-card">
           <div className="review-check"><Check size={15} /></div><div className="review-symbol"><Lightbulb size={18} /></div>
           <div><small>Memory</small><strong>Save this note</strong><span>Add to the related people</span></div>
         </article>
-        {detected.date && <article className="review-card"><div className="review-check"><Check size={15} /></div><div className="review-symbol"><CalendarDays size={18} /></div><div><small>Possible date</small><strong>{detected.date}</strong><span>Suggest a reminder</span></div></article>}
+        {dateRows.map(date => <article className="review-card" key={date}><div className="review-check"><Check size={15} /></div><div className="review-symbol"><CalendarDays size={18} /></div><div><small>Possible date</small><strong>{date}</strong><span>Suggest a reminder</span></div></article>)}
       </section>
-      <button className="primary-button wide sticky-save" onClick={() => { const savedText = text; setText(''); setReview(false); onSaved(savedText) }}><Sparkles size={17} /> Add to Keepsake</button>
+      <button className="primary-button wide sticky-save" onClick={() => { const savedText = text; setText(''); setReview(false); setPreview(null); setPreviewState('idle'); onSaved(savedText) }}><Sparkles size={17} /> Add to Keepsake</button>
     </main>
-  )
+    )
+  }
 
   return (
     <main className="page add-page">
@@ -443,7 +568,7 @@ function AddMemory({ people, onSaved, onImported }) {
         </div>
       </div>
       {text && <div className="detection-hint"><Sparkles size={16} /><span>{detected.known.length ? `I recognize ${detected.known.map(p => p.name).join(', ')}` : 'I’ll look for people, dates, and memories'}</span></div>}
-      <button className="primary-button wide" disabled={!text.trim()} onClick={() => setReview(true)}><Sparkles size={17} /> Organize this note</button>
+      <button className="primary-button wide" disabled={!text.trim()} onClick={openReview}><Sparkles size={17} /> Organize this note</button>
       <div className="privacy-note"><Heart size={15} /><span>Your memories are private and always yours.</span></div>
       <div className="add-divider"><span>or bring in people</span></div>
       <section className="add-import-section">
@@ -461,13 +586,50 @@ export default function App() {
   const [selected, setSelected] = useState(null)
   const [creating, setCreating] = useState(false)
   const [toast, setToast] = useState('')
+  const [user, setUser] = useState(null)
+  const [accountOpen, setAccountOpen] = useState(false)
+  const [authError, setAuthError] = useState('')
+  const liveEvents = useUpcomingReminders()
 
   const showToast = message => {
     setToast(message)
     window.setTimeout(() => setToast(''), 2400)
   }
 
+  const refreshMe = () => {
+    fetch('/api/auth/me')
+      .then(response => response.ok ? response.json() : Promise.reject(new Error('offline')))
+      .then(({ user: me }) => setUser(me))
+      .catch(() => {})
+  }
+
+  const handleAuth = async (mode, fields) => {
+    setAuthError('')
+    try {
+      const response = await fetch(`/api/auth/${mode}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(fields),
+      })
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload.error || 'Could not sign you in.')
+      setUser(payload.user)
+      setAccountOpen(false)
+      showToast(`Welcome, ${payload.user.display_name || 'friend'}`)
+    } catch (error) {
+      setAuthError(error.message)
+    }
+  }
+
+  const handleLogout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {})
+    setUser(null)
+    setAccountOpen(false)
+    showToast('Signed out on this device')
+  }
+
   useEffect(() => {
+    refreshMe()
     fetch('/api/people')
       .then(response => response.ok ? response.json() : Promise.reject(new Error('Could not load people')))
       .then(({ people: savedPeople }) => {
@@ -551,8 +713,8 @@ export default function App() {
   let content
   if (selected) content = <PersonDetail person={selected} onBack={() => setSelected(null)} />
   else if (creating) content = <AddPerson onCancel={() => setCreating(false)} onSave={addPerson} />
-  else if (tab === 'today') content = <Today onOpen={setSelected} onAdd={() => setTab('add')} />
-  else if (tab === 'upcoming') content = <Upcoming />
+  else if (tab === 'today') content = <Today onOpen={setSelected} onAdd={() => setTab('add')} user={user} onAccount={() => { setAuthError(''); setAccountOpen(true) }} comingUp={liveEvents} />
+  else if (tab === 'upcoming') content = <Upcoming events={liveEvents} />
   else if (tab === 'relationships') content = <Relationships people={people} onOpen={setSelected} onCreate={() => setCreating(true)} />
   else content = <AddMemory people={people} onImported={handleImport} onSaved={saveNote} />
 
@@ -561,6 +723,7 @@ export default function App() {
       <div className="brand-rail"><div className="brand-mark"><Heart size={18} fill="currentColor" /></div><span>Keepsake</span></div>
       <div className="app-content">{content}</div>
       {!selected && !creating && <nav className="tab-bar">{tabs.map(item => { const Icon = item.icon; return <button key={item.id} className={tab === item.id ? 'active' : ''} onClick={() => setTab(item.id)}><span className={item.id === 'add' ? 'add-tab-icon' : ''}><Icon size={21} /></span><small>{item.label}</small></button> })}</nav>}
+      {accountOpen && <AuthModal user={user} authError={authError} onClose={() => setAccountOpen(false)} onAuth={handleAuth} onLogout={handleLogout} />}
       {toast && <div className="toast"><Check size={16} /> {toast}</div>}
     </div>
   )

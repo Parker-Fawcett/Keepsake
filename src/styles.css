@@ -227,4 +227,14 @@ button { color: inherit; }
   .toast { bottom: 45px; }
   .onboarding-shell { max-width: 640px; padding: 0; }
   .onboarding { min-height: calc(100vh - 56px); padding: 33px 70px 52px; }
+  .auth-overlay { place-items: center; }
 }
+
+.header-actions { display: flex; gap: 8px; align-items: center; }
+.auth-overlay { position: fixed; z-index: 40; inset: 0; background: rgba(41,40,34,.45); display: grid; place-items: end center; padding: 18px; }
+.auth-sheet { width: min(100%, 420px); background: var(--sheet); border: 1px solid var(--ink); box-shadow: 6px 6px 0 #b9b0a1; padding: 22px 20px 18px; animation: enter .22s ease-out; }
+.auth-field { display: flex; flex-direction: column; gap: 7px; margin: 12px 0; }
+.auth-field span { font: 500 8px/1 var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .8px; }
+.auth-field input { border: 0; border-bottom: 1px solid var(--ink); background: transparent; outline: 0; padding: 11px 1px; font-size: 13px; }
+.auth-error { color: var(--brick); font-size: 11px; margin: 4px 0 0; }
+.auth-switch { margin: 12px auto 0; display: block; }
