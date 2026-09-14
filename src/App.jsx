@@ -13,6 +13,7 @@ import {
   ContactRound,
   FileUp,
   Gift,
+  Globe,
   Heart,
   Home,
   Lightbulb,
@@ -104,6 +105,7 @@ const tabs = [
 
 const importSources = [
   { id: 'contacts', name: 'Phone contacts', detail: 'Names, photos, birthdays and numbers', icon: ContactRound, tone: 'sage' },
+  { id: 'google', name: 'Google contacts', detail: 'Sync the Google account you choose', icon: Globe, tone: 'blue' },
   { id: 'linkedin', name: 'LinkedIn', detail: 'Upload your official Connections CSV', icon: BriefcaseBusiness, tone: 'blue' },
   { id: 'facebook', name: 'Facebook', detail: 'Upload your Facebook information export', icon: BookUser, tone: 'indigo' },
 ]
@@ -168,9 +170,35 @@ function ImportSources({ onImported, compact = false }) {
   const [source, setSource] = useState('linkedin')
   const [review, setReview] = useState(null)
 
+  // Returning from Google OAuth lands on #import=google: pull the synced
+  // contacts straight into the same review flow as a CSV.
+  useEffect(() => {
+    if (window.location.hash !== '#import=google') return
+    window.history.replaceState(null, '', window.location.pathname)
+    fetch('/api/imports/google/preview')
+      .then(response => response.ok ? response.json() : Promise.reject(new Error('preview failed')))
+      .then(result => {
+        const records = [...result.fresh, ...result.candidates.map(candidate => candidate.incoming)]
+          .sort((a, b) => a._idx - b._idx)
+        setReview({ source: result.source, records, result })
+      })
+      .catch(() => onImported('Google contacts', 0, 'Google sync hit a snag. Try again.'))
+  }, [onImported])
+
   const chooseFile = sourceId => {
     setSource(sourceId)
     window.setTimeout(() => fileInput.current?.click(), 0)
+  }
+
+  const connectGoogle = async () => {
+    try {
+      const response = await fetch('/api/auth/google')
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload.error || 'Google sync is not set up yet.')
+      window.location.href = payload.url
+    } catch (error) {
+      onImported('Google contacts', 0, error.message)
+    }
   }
 
   const importPhoneContacts = async () => {
@@ -239,11 +267,12 @@ function ImportSources({ onImported, compact = false }) {
       <input ref={fileInput} className="hidden-file" type="file" accept={source === 'linkedin' ? '.csv' : '.zip,.json,.html,.csv'} onChange={handleFile} />
       {importSources.map(item => {
         const Icon = item.icon
+        const action = item.id === 'contacts' ? importPhoneContacts : item.id === 'google' ? connectGoogle : () => chooseFile(item.id)
         return (
-          <button className="import-source" key={item.id} onClick={() => item.id === 'contacts' ? importPhoneContacts() : chooseFile(item.id)}>
+          <button className="import-source" key={item.id} onClick={action}>
             <span className={`source-icon ${item.tone}`}><Icon size={20} /></span>
             <span><strong>{item.name}</strong><small>{item.detail}</small></span>
-            {item.id === 'contacts' ? <ArrowRight size={17} /> : <FileUp size={17} />}
+            {item.id === 'contacts' ? <ArrowRight size={17} /> : item.id === 'google' ? <ArrowRight size={17} /> : <FileUp size={17} />}
           </button>
         )
       })}

@@ -6,6 +6,7 @@ import { attachUser, clearSession, createSession, hashPassword, passwordMatches 
 import { DEMO_USER_ID, sql } from './db.js'
 import { extractRelationships } from './extract.js'
 import { buildImportReview, MAX_REVIEW_RECORDS, validateImportConfirm } from './imports.js'
+import { buildAuthUrl, exchangeCode, fetchConnections, isGoogleConfigured, redirectUriFor, refreshAccessToken } from './google.js'
 import { validateConfirmPayload } from './confirm.js'
 import { rateLimit } from './ratelimit.js'
 import { buildRemindersForDate, DEFAULT_REMINDER_RULES } from './reminders.js'
@@ -113,6 +114,89 @@ app.delete('/api/push-tokens', async (request, response, next) => {
     if (!token) return response.status(400).json({ error: 'Enter a device token.' })
     await sql`DELETE FROM device_tokens WHERE user_id = ${ownerIdFor(request)} AND token = ${token}`
     response.json({ ok: true })
+  } catch (error) {
+    next(error)
+  }
+})
+
+const OAUTH_STATE_COOKIE = 'keepsake_oauth_state'
+
+app.get('/api/auth/google', async (request, response) => {
+  if (!isGoogleConfigured()) return response.status(400).json({ error: 'Google sync is not set up yet.' })
+  const { randomBytes } = await import('node:crypto')
+  const state = randomBytes(16).toString('hex')
+  response.cookie(OAUTH_STATE_COOKIE, state, { httpOnly: true, sameSite: 'lax', maxAge: 10 * 60 * 1000, path: '/' })
+  response.json({ url: buildAuthUrl(process.env, redirectUriFor(process.env, request.headers.host), state) })
+})
+
+app.get('/api/auth/google/callback', async (request, response, next) => {
+  try {
+    const cookies = Object.fromEntries(
+      String(request.headers.cookie || '').split(';').map(item => item.trim().split('=')).filter(parts => parts.length === 2),
+    )
+    const state = String(request.query?.state || '')
+    const code = String(request.query?.code || '')
+    if (!state || !cookies[OAUTH_STATE_COOKIE] || state !== cookies[OAUTH_STATE_COOKIE] || !code) {
+      return response.redirect('/#import=google-error')
+    }
+    response.clearCookie(OAUTH_STATE_COOKIE, { path: '/' })
+    const redirectUri = redirectUriFor(process.env, request.headers.host)
+    const tokens = await exchangeCode(process.env, code, redirectUri)
+    const expiresAt = tokens.expires_in ? new Date(Date.now() + tokens.expires_in * 1000).toISOString() : null
+    await sql`
+      INSERT INTO connected_accounts (user_id, provider, access_token, refresh_token, expires_at)
+      VALUES (${ownerIdFor(request)}, 'google', ${tokens.access_token}, ${tokens.refresh_token || null}, ${expiresAt})
+      ON CONFLICT (user_id, provider) DO UPDATE SET
+        access_token = EXCLUDED.access_token,
+        refresh_token = COALESCE(EXCLUDED.refresh_token, connected_accounts.refresh_token),
+        expires_at = EXCLUDED.expires_at,
+        updated_at = now()
+    `
+    response.redirect('/#import=google')
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.get('/api/auth/google/status', async (request, response, next) => {
+  try {
+    const [account] = await sql`SELECT provider_email, updated_at FROM connected_accounts WHERE user_id = ${ownerIdFor(request)} AND provider = 'google'`
+    response.json({ connected: Boolean(account), email: account?.provider_email || null })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.delete('/api/auth/google', async (request, response, next) => {
+  try {
+    await sql`DELETE FROM connected_accounts WHERE user_id = ${ownerIdFor(request)} AND provider = 'google'`
+    response.json({ ok: true })
+  } catch (error) {
+    next(error)
+  }
+})
+
+async function googleAccessToken(ownerId) {
+  const [account] = await sql`SELECT access_token, refresh_token, expires_at FROM connected_accounts WHERE user_id = ${ownerId} AND provider = 'google'`
+  if (!account) return null
+  if (account.refresh_token && (!account.expires_at || new Date(account.expires_at).getTime() < Date.now() + 60000)) {
+    const refreshed = await refreshAccessToken(process.env, account.refresh_token)
+    const expiresAt = refreshed.expires_in ? new Date(Date.now() + refreshed.expires_in * 1000).toISOString() : null
+    await sql`UPDATE connected_accounts SET access_token = ${refreshed.access_token}, expires_at = ${expiresAt}, updated_at = now() WHERE user_id = ${ownerId} AND provider = 'google'`
+    return refreshed.access_token
+  }
+  return account.access_token
+}
+
+app.get('/api/imports/google/preview', async (request, response, next) => {
+  try {
+    if (!isGoogleConfigured()) return response.status(400).json({ error: 'Google sync is not set up yet.' })
+    const ownerId = ownerIdFor(request)
+    const accessToken = await googleAccessToken(ownerId)
+    if (!accessToken) return response.status(400).json({ error: 'Connect your Google account first.' })
+    const records = (await fetchConnections(accessToken)).map((record, _idx) => ({ ...record, _idx }))
+    const existing = await sql`SELECT id, name, relationship, email, phone FROM people WHERE owner_id = ${ownerId} AND archived_at IS NULL`
+    response.json({ source: 'Google contacts', ...buildImportReview(existing, records.slice(0, MAX_REVIEW_RECORDS)) })
   } catch (error) {
     next(error)
   }
