@@ -7,6 +7,8 @@ import {
   isValidOptionalEmail,
   isValidOptionalPhone,
   isValidPassword,
+  isValidPushPlatform,
+  isValidPushToken,
   normalizeEmail,
 } from '../validate.js'
 
@@ -64,5 +66,19 @@ describe('input validators', () => {
     expect(isValidOptionalPhone('123')).toBe(false)
     expect(isValidOptionalPhone('call me')).toBe(false)
     expect(isValidOptionalPhone('1'.repeat(16))).toBe(false)
+  })
+
+  it('requires push tokens between 1 and 512 characters', () => {
+    expect(isValidPushToken('')).toBe(false)
+    expect(isValidPushToken('ExponentPushToken[abc123]')).toBe(true)
+    expect(isValidPushToken('x'.repeat(513))).toBe(false)
+  })
+
+  it('only accepts known push platforms', () => {
+    expect(isValidPushPlatform('web')).toBe(true)
+    expect(isValidPushPlatform('ios')).toBe(true)
+    expect(isValidPushPlatform('android')).toBe(true)
+    expect(isValidPushPlatform('carrier-pigeon')).toBe(false)
+    expect(isValidPushPlatform('')).toBe(false)
   })
 })

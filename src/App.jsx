@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { mapReminderToEvent, recordsFromCsv } from './lib/upcoming.js'
 import {
   ArrowRight,
   Bell,
@@ -107,9 +108,65 @@ const importSources = [
   { id: 'facebook', name: 'Facebook', detail: 'Upload your Facebook information export', icon: BookUser, tone: 'indigo' },
 ]
 
+const reasonWords = { 'exact-name': 'same name', email: 'same email', phone: 'same number' }
+
+function ImportReview({ source, records, result, onConfirm, onBack }) {
+  const [choices, setChoices] = useState(() => Object.fromEntries(result.candidates.map((_, i) => [i, 'merge'])))
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const merges = result.candidates.filter((_, i) => choices[i] === 'merge').length
+  const creates = result.fresh.length + result.candidates.filter((_, i) => choices[i] === 'create').length
+
+  const confirm = async () => {
+    setSaving(true)
+    setError('')
+    try {
+      const resolutions = []
+      result.candidates.forEach((candidate, i) => {
+        const choice = choices[i]
+        if (choice === 'skip') resolutions.push({ index: candidate.incoming._idx, action: 'skip' })
+        else if (choice === 'create') resolutions.push({ index: candidate.incoming._idx, action: 'create' })
+        else resolutions.push({ index: candidate.incoming._idx, action: 'merge', personId: candidate.matches[0].person.id })
+      })
+      result.fresh.forEach(record => resolutions.push({ index: record._idx, action: 'create' }))
+      await onConfirm(resolutions)
+    } catch {
+      setError('Could not finish that import yet.')
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div>
+      <div className="section-heading"><div><p className="kicker">{source} · {records.length} rows</p><h2>Who goes in?</h2></div><button className="text-button" onClick={onBack}>Back</button></div>
+      <p className="intro">{result.fresh.length} new cards{result.candidates.length ? `, ${result.candidates.length} possible duplicates` : ''}{result.skipped ? `, ${result.skipped} rows skipped` : ''}.</p>
+      {result.candidates.map((candidate, i) => {
+        const match = candidate.matches[0]
+        return (
+          <article className="merge-card" key={`${candidate.incoming.name}-${i}`}>
+            <div><small>Possible duplicate</small><strong>{candidate.incoming.name}</strong><span>Looks like {match.person.name} in your circle ({match.reasons.map(r => reasonWords[r] || r).join(' · ')}). Merge them?</span></div>
+            <div className="merge-choices">
+              <button className={choices[i] === 'merge' ? 'active' : ''} onClick={() => setChoices(prev => ({ ...prev, [i]: 'merge' }))}>Merge</button>
+              <button className={choices[i] === 'create' ? 'active' : ''} onClick={() => setChoices(prev => ({ ...prev, [i]: 'create' }))}>Keep separate</button>
+              <button className={choices[i] === 'skip' ? 'active' : ''} onClick={() => setChoices(prev => ({ ...prev, [i]: 'skip' }))}>Skip</button>
+            </div>
+          </article>
+        )
+      })}
+      {result.fresh.length > 0 && (
+        <div className="merge-fresh"><small>New cards</small>{result.fresh.map(record => <span key={record._idx}><Plus size={12} /> {record.name}</span>)}</div>
+      )}
+      {error && <p className="auth-error">{error}</p>}
+      <button className="primary-button wide" disabled={saving || (creates + merges === 0)} onClick={confirm}>{saving ? 'Importing…' : `Import ${creates + merges} ${creates + merges === 1 ? 'person' : 'people'}`}</button>
+    </div>
+  )
+}
+
 function ImportSources({ onImported, compact = false }) {
   const fileInput = useRef(null)
   const [source, setSource] = useState('linkedin')
+  const [review, setReview] = useState(null)
 
   const chooseFile = sourceId => {
     setSource(sourceId)
@@ -129,21 +186,57 @@ function ImportSources({ onImported, compact = false }) {
     onImported('Phone contacts', 0, 'Phone contact access will be available in the installed mobile app.')
   }
 
+  const confirmImport = async resolutions => {
+    const cleanRecords = review.records.map(({ _idx, ...rest }) => rest)
+    const response = await fetch('/api/imports/confirm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: review.source, records: cleanRecords, resolutions }),
+    })
+    if (!response.ok) throw new Error('Could not finish that import yet.')
+    const { created, merged } = await response.json()
+    const total = created.length + merged.length
+    setReview(null)
+    onImported(review.source, total, total ? '' : 'Nothing new to import.')
+  }
+
   const handleFile = async event => {
     const file = event.target.files?.[0]
-    if (!file) return
-    let count = 0
-    if (file.name.toLowerCase().endsWith('.csv')) {
-      const rows = (await file.text()).split(/\r?\n/).filter(row => row.trim())
-      count = Math.max(0, rows.length - 1)
-    }
-    onImported(source === 'linkedin' ? 'LinkedIn' : 'Facebook', count)
     event.target.value = ''
+    if (!file) return
+    const label = source === 'linkedin' ? 'LinkedIn' : 'Facebook'
+    // CSVs get the full review flow: parse, match duplicates, confirm.
+    if (file.name.toLowerCase().endsWith('.csv')) {
+      try {
+        const records = recordsFromCsv(await file.text()).map((record, _idx) => ({ ...record, _idx }))
+        if (records.length) {
+          const response = await fetch('/api/imports/review', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ source: label, records }),
+          })
+          if (!response.ok) throw new Error('Review unavailable.')
+          setReview({ source: label, records, result: await response.json() })
+          return
+        }
+      } catch {
+        // Fall through to the count-only path below.
+      }
+    }
+    onImported(label, 0, 'That file is saved for review.')
+  }
+
+  if (review) {
+    return (
+      <div className={`import-sources ${compact ? 'compact-imports' : ''}`}>
+        <ImportReview source={review.source} records={review.records} result={review.result} onBack={() => setReview(null)} onConfirm={confirmImport} />
+      </div>
+    )
   }
 
   return (
     <div className={`import-sources ${compact ? 'compact-imports' : ''}`}>
-      <input ref={fileInput} className="hidden-file" type="file" accept={source === 'linkedin' ? '.csv' : '.zip,.json,.html'} onChange={handleFile} />
+      <input ref={fileInput} className="hidden-file" type="file" accept={source === 'linkedin' ? '.csv' : '.zip,.json,.html,.csv'} onChange={handleFile} />
       {importSources.map(item => {
         const Icon = item.icon
         return (
@@ -323,51 +416,6 @@ function EventRow({ event }) {
   )
 }
 
-const reminderPalette = ['#d98e78', '#8ea1b6', '#b291a4', '#86a798']
-
-function colorForName(name) {
-  let hash = 0
-  for (const char of String(name || '')) hash = (hash * 31 + char.charCodeAt(0)) >>> 0
-  return reminderPalette[hash % reminderPalette.length]
-}
-
-function iconForReminder(title, dateLabel) {
-  const text = `${title || ''} ${dateLabel || ''}`.toLowerCase()
-  if (text.includes('birthday')) return CakeSlice
-  if (text.includes('annivers')) return Heart
-  if (text.includes('interview')) return Star
-  if (text.includes('moving') || text.includes('home')) return Home
-  if (text.includes('gift')) return Gift
-  return CalendarDays
-}
-
-function dayLabelFor(date) {
-  const startOfToday = new Date()
-  startOfToday.setHours(0, 0, 0, 0)
-  const startOfDate = new Date(date)
-  startOfDate.setHours(0, 0, 0, 0)
-  const diffDays = Math.round((startOfDate - startOfToday) / (24 * 60 * 60 * 1000))
-  if (diffDays <= 0) return 'TODAY'
-  if (diffDays === 1) return 'TOMOR'
-  return ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'][startOfDate.getDay()]
-}
-
-function mapReminderToEvent(reminder) {
-  const at = new Date(reminder.remind_at)
-  const person = reminder.person_name || 'Someone'
-  return {
-    day: dayLabelFor(at),
-    date: String(at.getDate()).padStart(2, '0'),
-    person,
-    title: reminder.title,
-    meta: `${reminder.date_label || 'Reminder'} · ${at.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`,
-    color: colorForName(person),
-    icon: iconForReminder(reminder.title, reminder.date_label),
-  }
-}
-
-// Live scheduled reminders. Returns null while loading or offline, so
-// callers fall back to the built-in content instead of flashing empty.
 function useUpcomingReminders() {
   const [events, setEvents] = useState(null)
   useEffect(() => {
@@ -420,14 +468,35 @@ function Relationships({ people, onOpen, onCreate }) {
   )
 }
 
+const detailMonths = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+
+function formatStoredDate(date) {
+  const month = detailMonths[(date.month || 1) - 1]
+  return `${month} ${date.day}${date.year ? `, ${date.year}` : ''}`
+}
+
 function PersonDetail({ person, onBack }) {
+  // Seed cards (numeric ids) are static demo content; stored people load
+  // their confirmed facts, dates, and memories from the API.
+  const isSeed = typeof person.id === 'number'
   const [note, setNote] = useState('')
-  const [notes, setNotes] = useState(person.notes)
+  const [localNotes, setLocalNotes] = useState([])
+  const [live, setLive] = useState(null)
+  useEffect(() => {
+    if (isSeed) return
+    fetch(`/api/people/${person.id}/details`)
+      .then(response => response.ok ? response.json() : Promise.reject(new Error('offline')))
+      .then(setLive)
+      .catch(() => {})
+  }, [person.id, isSeed])
   const addNote = () => {
     if (!note.trim()) return
-    setNotes(prev => [note.trim(), ...prev])
+    setLocalNotes(prev => [note.trim(), ...prev])
     setNote('')
   }
+  const dates = live ? live.dates.map(date => ({ label: date.label, value: formatStoredDate(date) })) : person.dates
+  const likes = live ? live.facts.filter(fact => fact.category === 'like').map(fact => fact.value) : person.likes
+  const notes = [...localNotes, ...(live ? live.notes.map(entry => entry.raw_text) : person.notes)]
   return (
     <main className="page detail-page">
       <button className="back-button" onClick={onBack}><ChevronLeft size={18} /> People</button>
@@ -439,11 +508,13 @@ function PersonDetail({ person, onBack }) {
       </div>
       <section className="detail-section">
         <div className="section-heading"><h2>Important dates</h2><button className="tiny-add"><Plus size={15} /> Add</button></div>
-        {person.dates.map(date => <div className="info-row" key={date.label}><span className="info-icon rose"><CalendarDays size={17} /></span><div><small>{date.label}</small><strong>{date.value}</strong></div><Bell size={16} /></div>)}
+        {dates.map(date => <div className="info-row" key={date.label}><span className="info-icon rose"><CalendarDays size={17} /></span><div><small>{date.label}</small><strong>{date.value}</strong></div><Bell size={16} /></div>)}
+        {dates.length === 0 && <p className="empty-line">Nothing saved yet.</p>}
       </section>
       <section className="detail-section">
         <div className="section-heading"><h2>Little things they love</h2><button className="tiny-add"><Plus size={15} /> Add</button></div>
-        <div className="tag-list">{person.likes.map(like => <span key={like}>{like}</span>)}</div>
+        <div className="tag-list">{likes.map(like => <span key={like}>{like}</span>)}</div>
+        {likes.length === 0 && <p className="empty-line">Nothing saved yet — it arrives here from your notes.</p>}
       </section>
       <section className="detail-section">
         <div className="section-heading"><h2>Notes & memories</h2></div>
@@ -634,19 +705,17 @@ export default function App() {
       .then(response => response.ok ? response.json() : Promise.reject(new Error('Could not load people')))
       .then(({ people: savedPeople }) => {
         if (!savedPeople?.length) return
-        const existingNames = new Set(peopleSeed.map(person => person.name.toLowerCase()))
-        const hydrated = savedPeople
-          .filter(person => !existingNames.has(person.name.toLowerCase()))
-          .map(person => ({
-            ...person,
-            initials: person.name[0].toUpperCase(),
-            nextEvent: 'Nothing scheduled yet',
-            memory: 'A new person in your circle',
-            likes: [],
-            dates: [],
-            notes: [],
-          }))
-        setPeople([...peopleSeed, ...hydrated])
+        // A real circle replaces the demo cards instead of mixing with them.
+        const hydrated = savedPeople.map(person => ({
+          ...person,
+          initials: person.name[0].toUpperCase(),
+          nextEvent: 'Nothing scheduled yet',
+          memory: 'A new person in your circle',
+          likes: [],
+          dates: [],
+          notes: [],
+        }))
+        setPeople(hydrated)
       })
       .catch(() => showToast('Working offline — changes may not sync'))
   }, [])
@@ -660,7 +729,7 @@ export default function App() {
       })
       if (!response.ok) throw new Error('Could not save person')
       const { person } = await response.json()
-      setPeople(prev => [...prev, { ...person, initials: name[0].toUpperCase(), nextEvent: 'Nothing scheduled yet', memory: 'A new person in your circle', likes: [], dates: [], notes: [] }])
+      setPeople(prev => [...prev.filter(entry => typeof entry.id === 'string'), { ...person, initials: name[0].toUpperCase(), nextEvent: 'Nothing scheduled yet', memory: 'A new person in your circle', likes: [], dates: [], notes: [] }])
       setCreating(false)
       showToast(`${name} was added to your circle`)
     } catch {

@@ -38,3 +38,12 @@ export function isValidOptionalPhone(phone) {
   const digits = String(phone).replace(/\D/g, '')
   return digits.length >= 7 && digits.length <= 15
 }
+
+export function isValidPushToken(token) {
+  const trimmed = String(token || '').trim()
+  return trimmed.length >= 1 && trimmed.length <= 512
+}
+
+export function isValidPushPlatform(platform) {
+  return platform === 'web' || platform === 'ios' || platform === 'android'
+}

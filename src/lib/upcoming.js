@@ -1,0 +1,105 @@
+import { CakeSlice, CalendarDays, Gift, Heart, Home, Star } from 'lucide-react'
+
+// Pure helpers that shape scheduled reminders into event rows and parse
+// contact CSVs. Tested in node; no DOM needed.
+
+export const reminderPalette = ['#d98e78', '#8ea1b6', '#b291a4', '#86a798']
+
+export function colorForName(name) {
+  let hash = 0
+  for (const char of String(name || '')) hash = (hash * 31 + char.charCodeAt(0)) >>> 0
+  return reminderPalette[hash % reminderPalette.length]
+}
+
+export function iconForReminder(title, dateLabel) {
+  const text = `${title || ''} ${dateLabel || ''}`.toLowerCase()
+  if (text.includes('birthday')) return CakeSlice
+  if (text.includes('annivers')) return Heart
+  if (text.includes('interview')) return Star
+  if (text.includes('moving') || text.includes('home')) return Home
+  if (text.includes('gift')) return Gift
+  return CalendarDays
+}
+
+export function dayLabelFor(date, now = new Date()) {
+  const startOfToday = new Date(now)
+  startOfToday.setHours(0, 0, 0, 0)
+  const startOfDate = new Date(date)
+  startOfDate.setHours(0, 0, 0, 0)
+  const diffDays = Math.round((startOfDate - startOfToday) / (24 * 60 * 60 * 1000))
+  if (diffDays <= 0) return 'TODAY'
+  if (diffDays === 1) return 'TOMOR'
+  return ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'][startOfDate.getDay()]
+}
+
+export function mapReminderToEvent(reminder) {
+  const at = new Date(reminder.remind_at)
+  const person = reminder.person_name || 'Someone'
+  return {
+    day: dayLabelFor(at),
+    date: String(at.getDate()).padStart(2, '0'),
+    person,
+    title: reminder.title,
+    meta: `${reminder.date_label || 'Reminder'} · ${at.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`,
+    color: colorForName(person),
+    icon: iconForReminder(reminder.title, reminder.date_label),
+  }
+}
+
+export function parseCsvRows(text) {
+  const rows = []
+  let row = []
+  let field = ''
+  let inQuotes = false
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i]
+    if (inQuotes) {
+      if (char === '"') {
+        if (text[i + 1] === '"') {
+          field += '"'
+          i += 1
+        } else inQuotes = false
+      } else field += char
+    } else if (char === '"') inQuotes = true
+    else if (char === ',') {
+      row.push(field)
+      field = ''
+    } else if (char === '\n') {
+      row.push(field)
+      rows.push(row)
+      row = []
+      field = ''
+    } else if (char !== '\r') field += char
+  }
+  if (field !== '' || row.length) {
+    row.push(field)
+    rows.push(row)
+  }
+  return rows.filter(cells => cells.some(cell => cell.trim() !== ''))
+}
+
+export function recordsFromCsv(text) {
+  const rows = parseCsvRows(text)
+  if (rows.length < 2) return []
+  const header = rows[0].map(cell => cell.trim().toLowerCase())
+  const col = (...keys) => header.findIndex(cell => keys.some(key => cell.includes(key)))
+  const firstName = col('first name')
+  const lastName = col('last name')
+  const fullName = firstName < 0 && lastName < 0 ? col('name') : -1
+  const email = col('email')
+  const phone = col('phone', 'mobile')
+  const company = col('company', 'organization')
+  return rows.slice(1).map(cells => {
+    const get = index => (index >= 0 ? (cells[index] || '').trim() : '')
+    let name = ''
+    if (firstName >= 0 || lastName >= 0) name = `${get(firstName)} ${get(lastName)}`.trim()
+    else if (fullName >= 0) name = get(fullName)
+    else name = get(0)
+    if (!name) return null
+    const record = { name }
+    if (get(email)) record.email = get(email)
+    if (get(phone)) record.phone = get(phone)
+    if (get(company)) record.company = get(company)
+    return record
+  }).filter(Boolean).slice(0, 5000)
+}

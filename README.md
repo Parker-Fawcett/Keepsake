@@ -27,12 +27,24 @@ Open the local address printed by the development command (normally `http://loca
 
 The app now runs through a small Express server with a server-only Neon Postgres connection. Copy `.env.example` to `.env.local`, add the Neon connection string, and run the migration before starting the app.
 
+```bash
+npm test          # backend + helper unit tests (no live database needed)
+npm run worker    # deliver due reminders once (cron-friendly)
+```
+
 Current API routes:
 
-- `GET /api/health` checks the database connection
-- `GET /api/people` lists saved people
-- `POST /api/people` creates a person
-- `POST /api/notes` stores a raw note for processing
-- `POST /api/imports` records an import job
+- `GET /api/health` checks the database connection and extraction mode
+- `POST /api/auth/signup`, `/api/auth/login`, `/api/auth/logout`, `GET /api/auth/me` for email/password sessions
+- `GET /api/people` lists saved people, `POST /api/people` creates one (optional email/phone)
+- `GET /api/people/:id/details` returns a person's facts, dates, reminders, and linked notes
+- `POST /api/notes` stores a raw note and runs extraction
+- `POST /api/extract/preview` runs extraction without saving (powers the review screen)
+- `POST /api/notes/:id/confirm` materializes reviewed people, facts, dates, and reminders
+- `POST /api/imports/review` previews duplicates, `POST /api/imports/confirm` executes the import, `POST /api/imports` records a count-only job
+- `GET /api/reminders/upcoming` lists scheduled future reminders
+- `POST /api/push-tokens`, `DELETE /api/push-tokens` register device tokens for delivery
 
-The database includes users, people, notes, note-person links, facts, important dates, reminders, and imports. The current local build uses one demo user; production authentication and row-level user isolation are the next backend milestone.
+Notes without `OPENAI_API_KEY` use local heuristics; with a key they use the model and fall back to local on any error. The delivery worker sends due reminders through the server log, or a `KEEPSAKE_WEBHOOK_URL` when set; native push slots into `server/notify.js` once provider credentials exist.
+
+The database includes users, sessions, people, notes, note-person links, facts, important dates, reminders, device tokens, and imports. Routes fall back to a demo owner when signed out; creator-owned checks and request rate limits guard every endpoint.

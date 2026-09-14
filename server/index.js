@@ -5,10 +5,11 @@ import { createServer as createViteServer } from 'vite'
 import { attachUser, clearSession, createSession, hashPassword, passwordMatches } from './auth.js'
 import { DEMO_USER_ID, sql } from './db.js'
 import { extractRelationships } from './extract.js'
-import { buildImportReview, MAX_REVIEW_RECORDS } from './imports.js'
+import { buildImportReview, MAX_REVIEW_RECORDS, validateImportConfirm } from './imports.js'
 import { validateConfirmPayload } from './confirm.js'
+import { rateLimit } from './ratelimit.js'
 import { buildRemindersForDate, DEFAULT_REMINDER_RULES } from './reminders.js'
-import { isValidEmail, isValidImportSource, isValidName, isValidNoteText, isValidOptionalEmail, isValidOptionalPhone, isValidPassword, normalizeEmail } from './validate.js'
+import { isValidEmail, isValidImportSource, isValidName, isValidNoteText, isValidOptionalEmail, isValidOptionalPhone, isValidPassword, isValidPushPlatform, isValidPushToken, normalizeEmail } from './validate.js'
 
 const app = express()
 const port = Number(process.env.PORT || 5173)
@@ -17,13 +18,20 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 app.disable('x-powered-by')
 app.use(express.json({ limit: '2mb' }))
 app.use(attachUser)
+app.use('/api', rateLimit({ windowMs: 60 * 1000, max: 300 }))
+const authLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 30 })
 
 const ownerIdFor = request => request.user?.id ?? DEMO_USER_ID
 
 app.get('/api/health', async (_request, response, next) => {
   try {
     const [database] = await sql`SELECT now() AS connected_at`
-    response.json({ ok: true, database: 'connected', connectedAt: database.connected_at })
+    response.json({
+      ok: true,
+      database: 'connected',
+      connectedAt: database.connected_at,
+      extraction: process.env.OPENAI_API_KEY ? 'openai' : 'local',
+    })
   } catch (error) {
     next(error)
   }
@@ -33,7 +41,7 @@ app.get('/api/auth/me', (request, response) => {
   response.json({ user: request.user ?? null })
 })
 
-app.post('/api/auth/signup', async (request, response, next) => {
+app.post('/api/auth/signup', authLimiter, async (request, response, next) => {
   try {
     const email = normalizeEmail(request.body?.email)
     const password = String(request.body?.password || '')
@@ -57,7 +65,7 @@ app.post('/api/auth/signup', async (request, response, next) => {
   }
 })
 
-app.post('/api/auth/login', async (request, response, next) => {
+app.post('/api/auth/login', authLimiter, async (request, response, next) => {
   try {
     const email = normalizeEmail(request.body?.email)
     const password = String(request.body?.password || '')
@@ -75,6 +83,35 @@ app.post('/api/auth/login', async (request, response, next) => {
 app.post('/api/auth/logout', async (request, response, next) => {
   try {
     await clearSession(request, response)
+    response.json({ ok: true })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/push-tokens', async (request, response, next) => {
+  try {
+    const token = String(request.body?.token || '').trim()
+    const platform = String(request.body?.platform || '').trim()
+    if (!isValidPushToken(token)) return response.status(400).json({ error: 'Enter a valid device token.' })
+    if (!isValidPushPlatform(platform)) return response.status(400).json({ error: 'Enter a valid platform.' })
+    const [saved] = await sql`
+      INSERT INTO device_tokens (user_id, token, platform)
+      VALUES (${ownerIdFor(request)}, ${token}, ${platform})
+      ON CONFLICT (user_id, token) DO UPDATE SET platform = EXCLUDED.platform
+      RETURNING id, platform, created_at
+    `
+    response.status(201).json({ token: saved })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.delete('/api/push-tokens', async (request, response, next) => {
+  try {
+    const token = String(request.body?.token || '').trim()
+    if (!token) return response.status(400).json({ error: 'Enter a device token.' })
+    await sql`DELETE FROM device_tokens WHERE user_id = ${ownerIdFor(request)} AND token = ${token}`
     response.json({ ok: true })
   } catch (error) {
     next(error)
@@ -290,6 +327,34 @@ app.get('/api/reminders/upcoming', async (request, response, next) => {
   }
 })
 
+app.get('/api/people/:id/details', async (request, response, next) => {
+  try {
+    const ownerId = ownerIdFor(request)
+    const [person] = await sql`
+      SELECT id, name, relationship, color, avatar_url, email, phone, created_at
+      FROM people
+      WHERE id = ${request.params.id} AND owner_id = ${ownerId} AND archived_at IS NULL
+    `
+    if (!person) return response.status(404).json({ error: 'Not found.' })
+    const facts = await sql`SELECT id, category, value, confidence, confirmed_at FROM facts WHERE person_id = ${person.id} ORDER BY created_at`
+    const dates = await sql`SELECT id, label, month, day, year, recurs_yearly, confidence FROM important_dates WHERE person_id = ${person.id} ORDER BY month, day`
+    const reminders = await sql`
+      SELECT id, title, remind_at FROM reminders
+      WHERE person_id = ${person.id} AND owner_id = ${ownerId} AND status = 'scheduled' AND remind_at >= now()
+      ORDER BY remind_at LIMIT 10
+    `
+    const notes = await sql`
+      SELECT notes.id, notes.raw_text, notes.created_at FROM note_people
+      JOIN notes ON notes.id = note_people.note_id
+      WHERE note_people.person_id = ${person.id}
+      ORDER BY notes.created_at DESC LIMIT 20
+    `
+    response.json({ person, facts, dates, reminders, notes })
+  } catch (error) {
+    next(error)
+  }
+})
+
 app.get('/api/notes/:id', async (request, response, next) => {
   try {
     const [note] = await sql`
@@ -317,6 +382,54 @@ app.post('/api/imports/review', async (request, response, next) => {
     // user's "Merge them?" confirmation before anything is imported.
     const existing = await sql`SELECT id, name, relationship, email, phone FROM people WHERE owner_id = ${ownerIdFor(request)} AND archived_at IS NULL`
     response.json({ source, ...buildImportReview(existing, records) })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/imports/confirm', async (request, response, next) => {
+  try {
+    const ownerId = ownerIdFor(request)
+    const validated = validateImportConfirm(request.body)
+    if (!validated.ok) return response.status(400).json({ error: validated.errors[0], errors: validated.errors })
+
+    const created = []
+    const merged = []
+    let skipped = 0
+    for (const item of validated.plan) {
+      if (item.action === 'skip') {
+        skipped += 1
+        continue
+      }
+      if (item.action === 'merge') {
+        const [existing] = await sql`SELECT id, email, phone FROM people WHERE id = ${item.personId} AND owner_id = ${ownerId} AND archived_at IS NULL`
+        if (!existing) return response.status(400).json({ error: 'One of the merge targets does not belong to your circle.' })
+        // Merging fills in contact details the card is missing; it never
+        // overwrites what is already there.
+        const [updated] = await sql`
+          UPDATE people
+          SET email = COALESCE(email, ${item.email}), phone = COALESCE(phone, ${item.phone})
+          WHERE id = ${existing.id}
+          RETURNING id, name, email, phone
+        `
+        merged.push(updated)
+        continue
+      }
+      const [row] = await sql`
+        INSERT INTO people (owner_id, name, relationship, email, phone)
+        VALUES (${ownerId}, ${item.name}, 'Other', ${item.email}, ${item.phone})
+        RETURNING id, name, relationship, email, phone
+      `
+      created.push(row)
+    }
+
+    const source = String(request.body.source).trim()
+    const [savedImport] = await sql`
+      INSERT INTO imports (owner_id, source, record_count, status)
+      VALUES (${ownerId}, ${source}, ${request.body.records.length}, 'complete')
+      RETURNING id, source, record_count, status, created_at
+    `
+    response.status(201).json({ import: savedImport, created, merged, skipped })
   } catch (error) {
     next(error)
   }
