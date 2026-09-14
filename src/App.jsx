@@ -1,11 +1,16 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import {
+  ArrowRight,
   Bell,
+  BookUser,
+  BriefcaseBusiness,
   CalendarDays,
   CakeSlice,
   Check,
   ChevronLeft,
   ChevronRight,
+  ContactRound,
+  FileUp,
   Gift,
   Heart,
   Home,
@@ -14,6 +19,7 @@ import {
   Plus,
   Search,
   Send,
+  ShieldCheck,
   Sparkles,
   Star,
   Users,
@@ -94,6 +100,102 @@ const tabs = [
   { id: 'relationships', label: 'People', icon: Users },
   { id: 'add', label: 'Add', icon: Plus },
 ]
+
+const importSources = [
+  { id: 'contacts', name: 'Phone contacts', detail: 'Names, photos, birthdays and numbers', icon: ContactRound, tone: 'sage' },
+  { id: 'linkedin', name: 'LinkedIn', detail: 'Upload your official Connections CSV', icon: BriefcaseBusiness, tone: 'blue' },
+  { id: 'facebook', name: 'Facebook', detail: 'Upload your Facebook information export', icon: BookUser, tone: 'indigo' },
+]
+
+function ImportSources({ onImported, compact = false }) {
+  const fileInput = useRef(null)
+  const [source, setSource] = useState('linkedin')
+
+  const chooseFile = sourceId => {
+    setSource(sourceId)
+    window.setTimeout(() => fileInput.current?.click(), 0)
+  }
+
+  const importPhoneContacts = async () => {
+    if (navigator.contacts?.select) {
+      try {
+        const contacts = await navigator.contacts.select(['name', 'email', 'tel'], { multiple: true })
+        onImported('Phone contacts', contacts.length)
+      } catch {
+        // The user closed the native contact picker.
+      }
+      return
+    }
+    onImported('Phone contacts', 0, 'Phone contact access will be available in the installed mobile app.')
+  }
+
+  const handleFile = async event => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    let count = 0
+    if (file.name.toLowerCase().endsWith('.csv')) {
+      const rows = (await file.text()).split(/\r?\n/).filter(row => row.trim())
+      count = Math.max(0, rows.length - 1)
+    }
+    onImported(source === 'linkedin' ? 'LinkedIn' : 'Facebook', count)
+    event.target.value = ''
+  }
+
+  return (
+    <div className={`import-sources ${compact ? 'compact-imports' : ''}`}>
+      <input ref={fileInput} className="hidden-file" type="file" accept={source === 'linkedin' ? '.csv' : '.zip,.json,.html'} onChange={handleFile} />
+      {importSources.map(item => {
+        const Icon = item.icon
+        return (
+          <button className="import-source" key={item.id} onClick={() => item.id === 'contacts' ? importPhoneContacts() : chooseFile(item.id)}>
+            <span className={`source-icon ${item.tone}`}><Icon size={20} /></span>
+            <span><strong>{item.name}</strong><small>{item.detail}</small></span>
+            {item.id === 'contacts' ? <ArrowRight size={17} /> : <FileUp size={17} />}
+          </button>
+        )
+      })}
+      <p className="source-safety"><ShieldCheck size={14} /> You choose what to import. Keepsake never scrapes social profiles.</p>
+    </div>
+  )
+}
+
+function Onboarding({ onComplete, onImported }) {
+  const [step, setStep] = useState(0)
+  const [note, setNote] = useState('')
+
+  const finish = () => {
+    localStorage.setItem('keepsake-onboarded', 'true')
+    onComplete(note)
+  }
+
+  return (
+    <main className="onboarding">
+      <div className="onboarding-top"><div className="onboarding-logo"><Heart size={18} fill="currentColor" /></div><span>Keepsake</span><button onClick={finish}>Skip for now</button></div>
+      <div className="step-dots">{[0, 1, 2].map(index => <span className={step === index ? 'active' : step > index ? 'done' : ''} key={index} />)}</div>
+      {step === 0 && <section className="onboarding-panel welcome-panel">
+        <div className="welcome-art"><div className="orbit-card one">M</div><div className="orbit-card two">J</div><div className="orbit-card three">O</div><Heart size={39} fill="currentColor" /></div>
+        <p className="kicker">Remember what matters</p>
+        <h1>Your people,<br /><em>beautifully remembered.</em></h1>
+        <p>Keepsake turns scattered notes into thoughtful reminders and living profiles for everyone you care about.</p>
+        <button className="primary-button wide" onClick={() => setStep(1)}>Begin setup <ArrowRight size={17} /></button>
+      </section>}
+      {step === 1 && <section className="onboarding-panel">
+        <p className="kicker">Step 1 · Start with what you know</p>
+        <h1>Pour it all out.</h1>
+        <p>Paste your long Google Keep note or type anything you remember. It can be messy.</p>
+        <div className="onboarding-composer"><textarea value={note} onChange={event => setNote(event.target.value)} placeholder={'Maya’s birthday is March 12…\nJake is moving next weekend…\nMom mentioned a pottery class…'} /><span><Sparkles size={15} /> We’ll organize people, dates and little details</span></div>
+        <button className="primary-button wide" onClick={() => setStep(2)}>{note.trim() ? 'Organize and continue' : 'I’ll add notes later'} <ArrowRight size={17} /></button>
+      </section>}
+      {step === 2 && <section className="onboarding-panel">
+        <p className="kicker">Step 2 · Build your circle</p>
+        <h1>Bring in your people.</h1>
+        <p>Start with contacts you already have. Keepsake will spot duplicates before creating cards.</p>
+        <ImportSources onImported={onImported} />
+        <button className="primary-button wide" onClick={finish}>Finish setup <Check size={17} /></button>
+      </section>}
+    </main>
+  )
+}
 
 function Avatar({ person, size = 'md' }) {
   return (
@@ -282,7 +384,7 @@ function AddPerson({ onCancel, onSave }) {
   )
 }
 
-function AddMemory({ people, onSaved }) {
+function AddMemory({ people, onSaved, onImported }) {
   const [text, setText] = useState('')
   const [listening, setListening] = useState(false)
   const [review, setReview] = useState(false)
@@ -343,11 +445,17 @@ function AddMemory({ people, onSaved }) {
       {text && <div className="detection-hint"><Sparkles size={16} /><span>{detected.known.length ? `I recognize ${detected.known.map(p => p.name).join(', ')}` : 'I’ll look for people, dates, and memories'}</span></div>}
       <button className="primary-button wide" disabled={!text.trim()} onClick={() => setReview(true)}><Sparkles size={17} /> Organize this note</button>
       <div className="privacy-note"><Heart size={15} /><span>Your memories are private and always yours.</span></div>
+      <div className="add-divider"><span>or bring in people</span></div>
+      <section className="add-import-section">
+        <div className="section-heading"><div><p className="kicker">Connect & import</p><h2>Build your circle faster</h2></div></div>
+        <ImportSources compact onImported={onImported} />
+      </section>
     </main>
   )
 }
 
 export default function App() {
+  const [onboarding, setOnboarding] = useState(() => localStorage.getItem('keepsake-onboarded') !== 'true')
   const [tab, setTab] = useState('today')
   const [people, setPeople] = useState(peopleSeed)
   const [selected, setSelected] = useState(null)
@@ -365,13 +473,31 @@ export default function App() {
     showToast(`${name} was added to your circle`)
   }
 
+  const handleImport = (source, count, message) => {
+    if (message) {
+      showToast(message)
+      return
+    }
+    showToast(count ? `${count} people found in ${source}` : `${source} export added for review`)
+  }
+
+  if (onboarding) return (
+    <div className="app-shell onboarding-shell">
+      <Onboarding onImported={handleImport} onComplete={note => {
+        setOnboarding(false)
+        if (note.trim()) showToast('Your first note is ready to review')
+      }} />
+      {toast && <div className="toast"><Check size={16} /> {toast}</div>}
+    </div>
+  )
+
   let content
   if (selected) content = <PersonDetail person={selected} onBack={() => setSelected(null)} />
   else if (creating) content = <AddPerson onCancel={() => setCreating(false)} onSave={addPerson} />
   else if (tab === 'today') content = <Today onOpen={setSelected} onAdd={() => setTab('add')} />
   else if (tab === 'upcoming') content = <Upcoming />
   else if (tab === 'relationships') content = <Relationships people={people} onOpen={setSelected} onCreate={() => setCreating(true)} />
-  else content = <AddMemory people={people} onSaved={() => { setTab('today'); showToast('Your Keepsake has been updated') }} />
+  else content = <AddMemory people={people} onImported={handleImport} onSaved={() => { setTab('today'); showToast('Your Keepsake has been updated') }} />
 
   return (
     <div className="app-shell">

@@ -19,5 +19,7 @@ Open the local address printed by the development command (normally `http://loca
 - Manual person creation
 - Messy-note capture and a classification review flow
 - Browser speech recognition when supported
+- Three-step onboarding with an initial note dump and contact import
+- Phone contact, LinkedIn Connections CSV, and Facebook export entry points
 
 The current parsing experience is a local interaction prototype. Production classification, authentication, encrypted storage, and push notification scheduling will be added behind service boundaries in the next phase.
