@@ -107,6 +107,11 @@ function ImportSources({ onImported, compact = false }) {
   // Returning from Google OAuth lands on #import=google: pull the synced
   // contacts straight into the same review flow as a CSV.
   useEffect(() => {
+    if (window.location.hash === '#import=google-error') {
+      window.history.replaceState(null, '', window.location.pathname)
+      onImported('Google contacts', 0, 'Google refused the connection. Try again.')
+      return
+    }
     if (window.location.hash !== '#import=google') return
     window.history.replaceState(null, '', window.location.pathname)
     fetch('/api/imports/google/preview')
