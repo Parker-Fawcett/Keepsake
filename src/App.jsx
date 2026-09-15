@@ -783,13 +783,16 @@ export default function App() {
       .catch(() => setNotificationState('idle'))
   }, [user])
 
-  const enableNotifications = async () => {
+  const enableNotifications = async ({ silent = false } = {}) => {
+    const complain = message => {
+      if (!silent) showToast(message)
+    }
     if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
-      showToast('This browser does not support notifications')
+      complain('This browser does not support notifications')
       return
     }
     if (Notification.permission === 'denied') {
-      showToast('Notifications are blocked in your browser settings')
+      complain('Notifications are blocked in your browser settings')
       return
     }
     setNotificationState('enabling')
@@ -815,9 +818,19 @@ export default function App() {
       showToast('Notifications are on for this browser')
     } catch (error) {
       setNotificationState('idle')
-      showToast(error.message || 'Could not enable notifications')
+      complain(error.message || 'Could not enable notifications')
     }
   }
+
+  // Ask once, on its own, the first time a signed-in user lands past
+  // onboarding. The button stays as the fallback for later.
+  useEffect(() => {
+    if (!user || !authReady || onboarding) return
+    if (localStorage.getItem('keepsake-notify-asked')) return
+    if (!('Notification' in window) || Notification.permission !== 'default') return
+    localStorage.setItem('keepsake-notify-asked', 'true')
+    enableNotifications({ silent: true })
+  }, [user, authReady, onboarding])
 
   const addPerson = async (name, relationship) => {
     try {
