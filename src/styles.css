@@ -100,6 +100,7 @@ button { color: inherit; }
 .mini-calendar span, .mini-calendar button { display: grid; place-items: center; height: 30px; border: 0; background: transparent; font-size: 10px; position: relative; }
 .mini-calendar .weekday { color: #98948b; font: 500 8px/1 var(--mono); height: 20px; }
 .mini-calendar button.selected { background: var(--brick); color: white; border-radius: 50%; }
+.mini-calendar button.picked { outline: 2px solid var(--forest); outline-offset: -2px; border-radius: 50%; }
 .mini-calendar button.has-event::after { content: ''; width: 4px; height: 4px; background: var(--brick); position: absolute; bottom: 1px; border-radius: 50%; }
 
 .search-box { display: flex; align-items: center; gap: 9px; border-bottom: 1px solid var(--ink); padding: 10px 1px; color: #88857c; }

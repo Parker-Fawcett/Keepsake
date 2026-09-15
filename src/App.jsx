@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { mapReminderToEvent, recordsFromCsv } from './lib/upcoming.js'
+import { buildCalendarMonth, mapReminderToEvent, recordsFromCsv } from './lib/upcoming.js'
 import {
   ArrowRight,
   Bell,
@@ -531,17 +531,55 @@ function useWeeklyDigest(enabled) {
 
 function Upcoming({ events }) {
   const moments = events || []
+  const today = new Date()
+  const [monthOffset, setMonthOffset] = useState(0)
+  const [picked, setPicked] = useState(null)
+
+  const viewed = new Date(today.getFullYear(), today.getMonth() + monthOffset, 1)
+  const grid = buildCalendarMonth(viewed.getFullYear(), viewed.getMonth())
+
+  const eventDays = new Set(
+    moments
+      .map(event => event.remindAt ? new Date(event.remindAt) : null)
+      .filter(date => date && date.getFullYear() === viewed.getFullYear() && date.getMonth() === viewed.getMonth())
+      .map(date => date.getDate()),
+  )
+
+  const shown = picked
+    ? moments.filter(event => {
+      if (!event.remindAt) return false
+      const date = new Date(event.remindAt)
+      return date.getFullYear() === picked.year && date.getMonth() === picked.month && date.getDate() === picked.day
+    })
+    : moments
+
+  const isToday = day => monthOffset === 0 && day === today.getDate()
+  const isPicked = day => picked?.year === viewed.getFullYear() && picked?.month === viewed.getMonth() && picked?.day === day
+
+  const tapDay = day => {
+    setPicked(prev => (prev?.year === viewed.getFullYear() && prev?.month === viewed.getMonth() && prev?.day === day
+      ? null
+      : { year: viewed.getFullYear(), month: viewed.getMonth(), day }))
+  }
+
+  const reset = () => {
+    setMonthOffset(0)
+    setPicked(null)
+  }
+
   return (
     <main className="page">
-      <Header eyebrow="Your relationship calendar" title="Upcoming" action={<button className="icon-button"><CalendarDays size={19} /></button>} />
-      <div className="month-switcher"><button><ChevronLeft size={17} /></button><strong>September 2026</strong><button><ChevronRight size={17} /></button></div>
+      <Header eyebrow="Your relationship calendar" title="Upcoming" action={<button className="icon-button" aria-label="Back to this month" title="Back to this month" onClick={reset}><CalendarDays size={19} /></button>} />
+      <div className="month-switcher"><button aria-label="Previous month" onClick={() => { setMonthOffset(offset => offset - 1); setPicked(null) }}><ChevronLeft size={17} /></button><strong>{grid.label}</strong><button aria-label="Next month" onClick={() => { setMonthOffset(offset => offset + 1); setPicked(null) }}><ChevronRight size={17} /></button></div>
       <div className="mini-calendar">
         {['M','T','W','T','F','S','S'].map((d, i) => <span className="weekday" key={`${d}-${i}`}>{d}</span>)}
-        {[7,8,9,10,11,12,13,14,15,16,17,18,19,20].map(d => <button key={d} className={d === 14 ? 'selected' : d === 19 ? 'has-event' : ''}>{d}</button>)}
+        {grid.cells.map((day, i) => day === null
+          ? <span className="day-blank" key={`blank-${i}`} />
+          : <button key={`${viewed.getFullYear()}-${viewed.getMonth()}-${day}`} className={`${isToday(day) ? 'selected' : ''} ${eventDays.has(day) ? 'has-event' : ''} ${isPicked(day) ? 'picked' : ''}`.trim().replace(/\s+/g, ' ')} onClick={() => tapDay(day)}>{day}</button>)}
       </div>
       <section className="section">
-        <div className="section-heading"><div><p className="kicker">Next in your circle</p><h2>Moments ahead</h2></div></div>
-        <div className="event-list">{moments.map(event => <EventRow event={event} key={`${event.title}-${event.date}-${event.person}`} />)}{!moments.length && <div className="empty-state"><CalendarDays size={20} /><strong>No reminders scheduled</strong><span>Confirmed birthdays, anniversaries, and events will collect here.</span></div>}</div>
+        <div className="section-heading"><div><p className="kicker">{picked ? `${grid.label.split(' ')[0]} ${picked.day}` : 'Next in your circle'}</p><h2>{picked ? 'That day' : 'Moments ahead'}</h2></div>{picked && <button className="link-button" onClick={() => setPicked(null)}>Show all <ChevronRight size={15} /></button>}</div>
+        <div className="event-list">{shown.map(event => <EventRow event={event} key={`${event.title}-${event.date}-${event.person}`} />)}{!shown.length && <div className="empty-state"><CalendarDays size={20} /><strong>{picked ? 'Nothing that day' : 'No reminders scheduled'}</strong><span>{picked ? 'Pick another day or come back to everything.' : 'Confirmed birthdays, anniversaries, and events will collect here.'}</span></div>}</div>
       </section>
     </main>
   )

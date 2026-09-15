@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { CakeSlice, CalendarDays, Heart } from 'lucide-react'
 import {
+  buildCalendarMonth,
   colorForName,
   dayLabelFor,
   iconForReminder,
@@ -72,6 +73,29 @@ describe('recordsFromCsv', () => {
   })
 
   it('returns nothing for a header-only file', () => {
-    expect(recordsFromCsv('First Name,Last Name\n')).toEqual([])
+    expect(recordsFromCsv('First Name, Last Name\n')).toEqual([])
+  })
+})
+
+describe('buildCalendarMonth', () => {
+  it('starts weeks on Monday with leading blanks', () => {
+    // September 2026 opens on a Tuesday: one blank, then 1..30.
+    const grid = buildCalendarMonth(2026, 8)
+    expect(grid.label).toBe('September 2026')
+    expect(grid.cells.slice(0, 3)).toEqual([null, 1, 2])
+    expect(grid.cells.filter(day => day !== null)).toHaveLength(30)
+    expect(grid.cells.length % 7).toBe(0)
+  })
+
+  it('needs no blanks when the month opens on Monday', () => {
+    // June 2026 opens on a Monday with 30 days.
+    const grid = buildCalendarMonth(2026, 5)
+    expect(grid.cells.slice(0, 3)).toEqual([1, 2, 3])
+    expect(grid.cells.filter(day => day !== null)).toHaveLength(30)
+  })
+
+  it('pads the trailing week so every row is complete', () => {
+    const grid = buildCalendarMonth(2026, 8)
+    expect(grid.cells.slice(-1)).toEqual([null])
   })
 })

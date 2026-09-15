@@ -32,12 +32,25 @@ export function dayLabelFor(date, now = new Date()) {
   return ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'][startOfDate.getDay()]
 }
 
-export function mapReminderToEvent(reminder) {
-  const at = new Date(reminder.remind_at)
+const monthLabels = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+
+// Monday-first calendar grid for a month. Cells are day numbers with null
+// for padding so every rendered row is complete.
+export function buildCalendarMonth(year, monthIndex) {
+  const daysInMonth = new Date(year, monthIndex + 1, 0).getDate()
+  const leading = (new Date(year, monthIndex, 1).getDay() + 6) % 7
+  const cells = [...Array(leading).fill(null)]
+  for (let day = 1; day <= daysInMonth; day += 1) cells.push(day)
+  while (cells.length % 7 !== 0) cells.push(null)
+  return { label: `${monthLabels[monthIndex]} ${year}`, cells }
+}
+
+export function mapReminderToEvent(reminder) {  const at = new Date(reminder.remind_at)
   const person = reminder.person_name || 'Someone'
   return {
     day: dayLabelFor(at),
     date: String(at.getDate()).padStart(2, '0'),
+    remindAt: reminder.remind_at,
     person,
     title: reminder.title,
     meta: `${reminder.date_label || 'Reminder'} · ${at.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`,
