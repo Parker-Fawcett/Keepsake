@@ -264,6 +264,19 @@ button { color: inherit; }
 .auth-error { color: var(--brick); font-size: 11px; margin: 4px 0 0; }
 .auth-switch { margin: 12px auto 0; display: block; }
 .auth-danger { color: var(--brick); margin: 16px auto 0; display: block; border-bottom: 1px solid currentColor; padding: 3px 0; }
+.token-section { border-top: 1px solid var(--line); margin-top: 18px; padding-top: 14px; }
+.token-section .kicker { margin-bottom: 6px; }
+.token-blurb { color: var(--muted); font-size: 10px; line-height: 1.5; margin: 0 0 8px; }
+.token-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 2px; border-bottom: 1px solid var(--line); font-size: 11px; }
+.token-secret { border: 1px dashed var(--brick); padding: 10px 12px; margin: 10px 0; display: flex; flex-direction: column; gap: 6px; }
+.token-secret span { font: 500 8px/1 var(--mono); color: var(--brick); text-transform: uppercase; letter-spacing: .8px; }
+.token-secret strong { font: 500 10px/1.5 var(--mono); word-break: break-all; user-select: all; }
+.checkin-row { width: 100%; display: grid; grid-template-columns: 34px 1fr 18px; gap: 11px; align-items: center; text-align: left; background: transparent; border: 0; border-bottom: 1px solid var(--line); padding: 13px 3px; cursor: pointer; }
+.checkin-row:first-child { border-top: 1px solid var(--line); }
+.checkin-icon { width: 32px; height: 32px; display: grid; place-items: center; color: var(--brick); border: 1px solid var(--brick); }
+.checkin-row > span:nth-child(2) { display: flex; flex-direction: column; min-width: 0; }
+.checkin-row strong { font-size: 12px; }
+.checkin-row small { font-size: 9px; color: var(--muted); margin-top: 3px; }
 .auth-required { background: var(--paper); }
 .auth-required .auth-sheet { margin: auto; }
 .auth-loading { padding: 0; display: grid; place-content: center; justify-items: center; gap: 12px; color: var(--forest); font: 500 9px/1 var(--mono); letter-spacing: .5px; }

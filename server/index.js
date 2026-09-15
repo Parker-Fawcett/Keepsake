@@ -2,7 +2,7 @@ import express from 'express'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { createServer as createViteServer } from 'vite'
-import { attachUser, clearSession, createSession, hashPassword, passwordMatches, requireAuth } from './auth.js'
+import { attachUser, clearSession, createSession, hashPassword, passwordMatches, requireAuth, tokenHash } from './auth.js'
 import { sql } from './db.js'
 import { extractRelationships } from './extract.js'
 import { buildImportReview, MAX_REVIEW_RECORDS, validateImportConfirm } from './imports.js'
@@ -10,6 +10,9 @@ import { buildAuthUrl, exchangeCode, fetchConnections, isGoogleConfigured, redir
 import { validateConfirmPayload } from './confirm.js'
 import { rateLimit } from './ratelimit.js'
 import { buildRemindersForDate, DEFAULT_REMINDER_RULES } from './reminders.js'
+import { buildWeeklyReview } from './digest.js'
+import { handleMcpRequest } from './mcp.js'
+import { randomBytes } from 'node:crypto'
 import { decryptSecret, encryptSecret, hasTokenEncryptionKey, isEncryptedSecret } from './secrets.js'
 import { isValidEmail, isValidImportSource, isValidName, isValidNoteText, isValidOptionalEmail, isValidOptionalPhone, isValidPassword, isValidPushPlatform, isValidPushToken, normalizeEmail } from './validate.js'
 
@@ -105,6 +108,83 @@ app.post('/api/auth/logout', async (request, response, next) => {
   }
 })
 
+// MCP answers on its own path with Bearer-token auth, outside the
+// cookie-session gate below.
+async function userFromBearer(request) {
+  const match = String(request.headers.authorization || '').match(/^Bearer\s+(.+)$/i)
+  if (!match) return null
+  const hash = tokenHash(match[1].trim())
+  const [user] = await sql`
+    SELECT users.id, users.email, users.display_name FROM api_tokens
+    JOIN users ON users.id = api_tokens.user_id
+    WHERE api_tokens.token_hash = ${hash}
+  `
+  if (user) await sql`UPDATE api_tokens SET last_used_at = now() WHERE token_hash = ${hash}`
+  return user || null
+}
+
+const mcpDb = {
+  async listPeople(ownerId) {
+    return sql`SELECT id, name, relationship FROM people WHERE owner_id = ${ownerId} AND archived_at IS NULL ORDER BY lower(name)`
+  },
+  async personDetails(ownerId, ref) {
+    const looksUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ref)
+    const [person] = looksUuid
+      ? await sql`SELECT id, name, relationship, color, email, phone FROM people WHERE owner_id = ${ownerId} AND archived_at IS NULL AND (id = ${ref} OR lower(name) = lower(${ref}))`
+      : await sql`SELECT id, name, relationship, color, email, phone FROM people WHERE owner_id = ${ownerId} AND archived_at IS NULL AND lower(name) = lower(${ref})`
+    if (!person) return null
+    const facts = await sql`SELECT category, value, confidence FROM facts WHERE person_id = ${person.id} ORDER BY created_at`
+    const dates = await sql`SELECT label, month, day, year FROM important_dates WHERE person_id = ${person.id} ORDER BY month, day`
+    const reminders = await sql`SELECT title, remind_at FROM reminders WHERE person_id = ${person.id} AND status = 'scheduled' AND remind_at >= now() ORDER BY remind_at LIMIT 10`
+    const notes = await sql`
+      SELECT notes.raw_text AS text, notes.created_at FROM note_people
+      JOIN notes ON notes.id = note_people.note_id
+      WHERE note_people.person_id = ${person.id}
+      ORDER BY notes.created_at DESC LIMIT 10
+    `
+    return { person, facts, dates, reminders, notes }
+  },
+  async upcomingReminders(ownerId, days) {
+    return sql`
+      SELECT reminders.title, reminders.remind_at, people.name AS person_name
+      FROM reminders
+      LEFT JOIN people ON people.id = reminders.person_id
+      WHERE reminders.owner_id = ${ownerId} AND reminders.status = 'scheduled'
+        AND reminders.remind_at >= now() AND reminders.remind_at <= now() + (${days} || ' days')::interval
+      ORDER BY reminders.remind_at LIMIT 50
+    `
+  },
+  async searchAll(ownerId, query) {
+    const like = `%${query.replace(/[\\%_]/g, char => `\\${char}`)}%`
+    const people = await sql`SELECT id, name, relationship FROM people WHERE owner_id = ${ownerId} AND archived_at IS NULL AND lower(name) LIKE lower(${like}) LIMIT 20`
+    const notes = await sql`SELECT id, left(raw_text, 500) AS text FROM notes WHERE owner_id = ${ownerId} AND raw_text ILIKE ${like} ORDER BY created_at DESC LIMIT 10`
+    const facts = await sql`
+      SELECT facts.category, facts.value, people.name AS person_name FROM facts
+      JOIN people ON people.id = facts.person_id
+      WHERE people.owner_id = ${ownerId} AND facts.value ILIKE ${like} LIMIT 20
+    `
+    return { people, notes, facts }
+  },
+  async logNote(ownerId, text) {
+    const stored = await storeNoteWithExtraction(ownerId, text, 'mcp')
+    return {
+      id: stored.note.id,
+      summary: stored.extraction?.summary || 'Note stored for review.',
+      people: (stored.extraction?.people || []).map(entry => ({ name: entry.name })),
+    }
+  },
+}
+
+app.post('/mcp', async (request, response) => {
+  try {
+    const user = await userFromBearer(request).catch(() => null)
+    response.json(await handleMcpRequest(request.body, { user, db: mcpDb }))
+  } catch (error) {
+    console.error(error)
+    response.status(500).json({ jsonrpc: '2.0', id: request.body?.id ?? null, error: { code: -32603, message: 'Keepsake could not complete that request.' } })
+  }
+})
+
 // Everything below this line contains private relationship data. A request
 // must have a valid session; there is no shared fallback account.
 app.use('/api', requireAuth)
@@ -163,6 +243,40 @@ app.delete('/api/auth/account', async (request, response, next) => {
     // accounts all cascade from the user row.
     await clearSession(request, response)
     await sql`DELETE FROM users WHERE id = ${request.user.id}`
+    response.json({ ok: true })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.get('/api/tokens', async (request, response, next) => {
+  try {
+    const tokens = await sql`SELECT id, name, created_at, last_used_at FROM api_tokens WHERE user_id = ${request.user.id} ORDER BY created_at`
+    response.json({ tokens })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/tokens', async (request, response, next) => {
+  try {
+    const name = String(request.body?.name || 'MCP access').trim().slice(0, 100) || 'MCP access'
+    const token = randomBytes(32).toString('hex')
+    const [saved] = await sql`
+      INSERT INTO api_tokens (user_id, name, token_hash)
+      VALUES (${request.user.id}, ${name}, ${tokenHash(token)})
+      RETURNING id, name, created_at
+    `
+    // The plaintext token is shown exactly once, here.
+    response.status(201).json({ token: { ...saved, token } })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.delete('/api/tokens/:id', async (request, response, next) => {
+  try {
+    await sql`DELETE FROM api_tokens WHERE id = ${request.params.id} AND user_id = ${request.user.id}`
     response.json({ ok: true })
   } catch (error) {
     next(error)
@@ -326,40 +440,43 @@ app.post('/api/notes', async (request, response, next) => {
     const source = String(request.body?.source || 'manual').trim()
     if (!isValidNoteText(rawText)) return response.status(400).json({ error: 'Enter a note under 100,000 characters.' })
 
-    const ownerId = ownerIdFor(request)
-    const [note] = await sql`
-      INSERT INTO notes (owner_id, raw_text, source)
-      VALUES (${ownerId}, ${rawText}, ${source})
-      RETURNING id, raw_text, source, processing_status, created_at
-    `
-
-    // Run relationship extraction without ever failing the saved note.
-    // Without OPENAI_API_KEY this uses the local heuristic; with a key it
-    // calls the model and falls back to local on any error.
-    try {
-      const knownPeople = await sql`SELECT id, name, relationship FROM people WHERE owner_id = ${ownerId} AND archived_at IS NULL`
-      const { mode, data } = await extractRelationships(rawText, knownPeople)
-      await sql`UPDATE notes SET extraction = ${JSON.stringify(data)}, processing_status = 'review' WHERE id = ${note.id}`
-
-      const matchedIds = new Set()
-      for (const entry of data.people || []) {
-        const match = knownPeople.find(person => person.name.toLowerCase() === String(entry.name || '').toLowerCase())
-        if (match && !matchedIds.has(match.id)) {
-          matchedIds.add(match.id)
-          await sql`INSERT INTO note_people (note_id, person_id, confidence) VALUES (${note.id}, ${match.id}, ${Math.min(1, Math.max(0, Number(entry.confidence) || 0.7))}) ON CONFLICT DO NOTHING`
-        }
-      }
-      const [updated] = await sql`SELECT id, raw_text, source, processing_status, extraction, created_at FROM notes WHERE id = ${note.id}`
-      return response.status(201).json({ note: updated, extraction: data, extractionMode: mode })
-    } catch (extractionError) {
-      console.error(extractionError)
-      await sql`UPDATE notes SET processing_error = 'extraction failed', processing_status = 'pending' WHERE id = ${note.id}`
-      return response.status(201).json({ note, extraction: null, extractionMode: 'failed' })
-    }
+    const stored = await storeNoteWithExtraction(ownerIdFor(request), rawText, source)
+    response.status(201).json(stored)
   } catch (error) {
     next(error)
   }
 })
+
+// Shared by note capture and the MCP log_note tool: insert the note, run
+// extraction without ever failing the save, link known people.
+async function storeNoteWithExtraction(ownerId, rawText, source) {
+  const [note] = await sql`
+    INSERT INTO notes (owner_id, raw_text, source)
+    VALUES (${ownerId}, ${rawText}, ${source})
+    RETURNING id, raw_text, source, processing_status, created_at
+  `
+
+  try {
+    const knownPeople = await sql`SELECT id, name, relationship FROM people WHERE owner_id = ${ownerId} AND archived_at IS NULL`
+    const { mode, data } = await extractRelationships(rawText, knownPeople)
+    await sql`UPDATE notes SET extraction = ${JSON.stringify(data)}, processing_status = 'review' WHERE id = ${note.id}`
+
+    const matchedIds = new Set()
+    for (const entry of data.people || []) {
+      const match = knownPeople.find(person => person.name.toLowerCase() === String(entry.name || '').toLowerCase())
+      if (match && !matchedIds.has(match.id)) {
+        matchedIds.add(match.id)
+        await sql`INSERT INTO note_people (note_id, person_id, confidence) VALUES (${note.id}, ${match.id}, ${Math.min(1, Math.max(0, Number(entry.confidence) || 0.7))}) ON CONFLICT DO NOTHING`
+      }
+    }
+    const [updated] = await sql`SELECT id, raw_text, source, processing_status, extraction, created_at FROM notes WHERE id = ${note.id}`
+    return { note: updated, extraction: data, extractionMode: mode }
+  } catch (extractionError) {
+    console.error(extractionError)
+    await sql`UPDATE notes SET processing_error = 'extraction failed', processing_status = 'pending' WHERE id = ${note.id}`
+    return { note, extraction: null, extractionMode: 'failed' }
+  }
+}
 
 app.post('/api/extract/preview', async (request, response, next) => {
   try {
@@ -466,6 +583,34 @@ app.post('/api/notes/:id/confirm', async (request, response, next) => {
       RETURNING id, raw_text, source, processing_status, extraction, created_at
     `
     response.json({ note: updated, people: resolvedIds, facts: createdFacts, dates: createdDates, reminders: createdReminders })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.get('/api/review/weekly', async (request, response, next) => {
+  try {
+    const ownerId = ownerIdFor(request)
+    const reminders = await sql`
+      SELECT reminders.id, reminders.title, reminders.remind_at, people.name AS person_name
+      FROM reminders
+      LEFT JOIN people ON people.id = reminders.person_id
+      WHERE reminders.owner_id = ${ownerId} AND reminders.status = 'scheduled'
+        AND reminders.remind_at >= now() AND reminders.remind_at <= now() + interval '7 days'
+      ORDER BY reminders.remind_at
+    `
+    const notes = await sql`
+      SELECT id, raw_text, processing_status, created_at FROM notes
+      WHERE owner_id = ${ownerId} AND processing_status IN ('review', 'pending')
+      ORDER BY created_at DESC LIMIT 20
+    `
+    const people = await sql`SELECT id, name FROM people WHERE owner_id = ${ownerId} AND archived_at IS NULL`
+    const links = await sql`
+      SELECT note_people.person_id, notes.created_at AS note_created_at FROM note_people
+      JOIN notes ON notes.id = note_people.note_id
+      WHERE notes.owner_id = ${ownerId}
+    `
+    response.json(buildWeeklyReview({ reminders, notes, people, links, now: new Date() }))
   } catch (error) {
     next(error)
   }

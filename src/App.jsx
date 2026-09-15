@@ -309,7 +309,40 @@ function AuthModal({ user, onClose, onAuth, onLogout, onDeleteAccount, authError
   const [password, setPassword] = useState('')
   const [displayName, setDisplayName] = useState('')
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [tokens, setTokens] = useState([])
+  const [tokenName, setTokenName] = useState('')
+  const [revealedToken, setRevealedToken] = useState('')
   const accountExists = authError?.toLowerCase().includes('already registered')
+
+  useEffect(() => {
+    if (!user) return
+    fetch('/api/tokens')
+      .then(response => response.ok ? response.json() : Promise.reject(new Error('offline')))
+      .then(({ tokens: saved }) => setTokens(saved || []))
+      .catch(() => {})
+  }, [user])
+
+  const createToken = async () => {
+    try {
+      const response = await fetch('/api/tokens', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: tokenName.trim() || 'MCP access' }),
+      })
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload.error || 'Could not create that token.')
+      setTokens(prev => [...prev, payload.token])
+      setRevealedToken(payload.token.token)
+      setTokenName('')
+    } catch {
+      setRevealedToken('')
+    }
+  }
+
+  const revokeToken = async id => {
+    await fetch(`/api/tokens/${id}`, { method: 'DELETE' }).catch(() => {})
+    setTokens(prev => prev.filter(token => token.id !== id))
+  }
 
   useEffect(() => {
     if (mode === 'signup' && accountExists) setMode('login')
@@ -327,6 +360,15 @@ function AuthModal({ user, onClose, onAuth, onLogout, onDeleteAccount, authError
           ? <>
             <p className="intro">Signed in as {user.email || user.display_name}. Your notes and people save to your account on this device and server.</p>
             <button className="primary-button wide" onClick={onLogout}>Sign out</button>
+            <div className="token-section">
+              <p className="kicker">Assistant access</p>
+              <p className="token-blurb">Let Claude, ChatGPT, or Gemini read your circle over MCP. A token reads everything you can read, so only connect assistants you trust.</p>
+              {tokens.map(token => (
+                <div className="token-row" key={token.id}><span>{token.name}</span><button className="text-button" onClick={() => revokeToken(token.id)}>Revoke</button></div>
+              ))}
+              {revealedToken && <div className="token-secret"><span>Copy it now, it shows once</span><strong>{revealedToken}</strong></div>}
+              <div className="quick-note"><input value={tokenName} onChange={e => setTokenName(e.target.value)} placeholder="Token name, e.g. Claude" /><button onClick={createToken} aria-label="Create token"><Plus size={18} /></button></div>
+            </div>
             {!confirmingDelete
               ? <button className="text-button auth-danger" onClick={() => setConfirmingDelete(true)}>Delete my account</button>
               : <>
@@ -348,7 +390,7 @@ function AuthModal({ user, onClose, onAuth, onLogout, onDeleteAccount, authError
   )
 }
 
-function Today({ onOpen, onAdd, onShowPeople, user, onAccount, comingUp, people, notificationState, onNotifications }) {
+function Today({ onOpen, onAdd, onShowPeople, user, onAccount, comingUp, people, checkins, notificationState, onNotifications }) {
   const teaser = comingUp?.slice(0, 2) || []
   const firstEvent = teaser[0]
   const firstName = String(user?.display_name || user?.email?.split('@')[0] || 'friend').split(' ')[0]
@@ -412,6 +454,26 @@ function Today({ onOpen, onAdd, onShowPeople, user, onAccount, comingUp, people,
         <span><strong>Remember something</strong><small>Type it, paste it, or say it out loud</small></span>
         <Mic size={19} />
       </button>
+
+      {checkins?.length > 0 && (
+        <section className="section">
+          <div className="section-heading">
+            <div>
+              <p className="kicker">Worth a check-in</p>
+              <h2>Quiet lately</h2>
+            </div>
+          </div>
+          <div className="event-list compact">
+            {checkins.slice(0, 3).map(person => (
+              <button className="checkin-row" key={person.id} onClick={() => onOpen(people.find(entry => entry.id === person.id) || person)}>
+                <span className="checkin-icon"><Heart size={15} /></span>
+                <span><strong>{person.name}</strong><small>Nothing together in a while — say hi</small></span>
+                <ChevronRight size={18} className="chevron" />
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
     </main>
   )
 }
@@ -441,6 +503,23 @@ function useUpcomingReminders(enabled) {
       .catch(() => setEvents(null))
   }, [enabled])
   return events
+}
+
+// Weekly digest: who has gone quiet. Null while loading or offline,
+// so Today simply hides the section instead of flashing.
+function useWeeklyDigest(enabled) {
+  const [quiet, setQuiet] = useState(null)
+  useEffect(() => {
+    if (!enabled) {
+      setQuiet(null)
+      return
+    }
+    fetch('/api/review/weekly')
+      .then(response => response.ok ? response.json() : Promise.reject(new Error('offline')))
+      .then(({ quiet: quietPeople }) => setQuiet(quietPeople || []))
+      .catch(() => setQuiet(null))
+  }, [enabled])
+  return quiet
 }
 
 function Upcoming({ events }) {
@@ -811,6 +890,7 @@ export default function App() {
   const [authError, setAuthError] = useState('')
   const [notificationState, setNotificationState] = useState('idle')
   const liveEvents = useUpcomingReminders(Boolean(user))
+  const quietPeople = useWeeklyDigest(Boolean(user))
 
   const showToast = message => {
     setToast(message)
@@ -1076,7 +1156,7 @@ export default function App() {
   let content
   if (selected) content = <PersonDetail person={selected} onBack={() => setSelected(null)} />
   else if (creating) content = <AddPerson onCancel={() => setCreating(false)} onSave={addPerson} />
-  else if (tab === 'today') content = <Today onOpen={setSelected} onAdd={() => setTab('add')} onShowPeople={() => setTab('relationships')} user={user} onAccount={() => { setAuthError(''); setAccountOpen(true) }} comingUp={liveEvents} people={people} notificationState={notificationState} onNotifications={enableNotifications} />
+  else if (tab === 'today') content = <Today onOpen={setSelected} onAdd={() => setTab('add')} onShowPeople={() => setTab('relationships')} user={user} onAccount={() => { setAuthError(''); setAccountOpen(true) }} comingUp={liveEvents} people={people} checkins={quietPeople} notificationState={notificationState} onNotifications={enableNotifications} />
   else if (tab === 'upcoming') content = <Upcoming events={liveEvents} />
   else if (tab === 'relationships') content = <Relationships people={people} onOpen={setSelected} onCreate={() => setCreating(true)} onDelete={deletePeople} />
   else content = <AddMemory people={people} onImported={handleImport} onSaved={saveNote} />

@@ -10,7 +10,7 @@ function parseCookies(header = '') {
   return Object.fromEntries(header.split(';').map(item => item.trim().split('=')).filter(parts => parts.length === 2))
 }
 
-function tokenHash(token) {
+export function tokenHash(token) {
   return createHash('sha256').update(token).digest('hex')
 }
 
