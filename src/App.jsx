@@ -461,25 +461,114 @@ function Upcoming({ events }) {
   )
 }
 
-function Relationships({ people, onOpen, onCreate }) {
+function Relationships({ people, onOpen, onCreate, onDelete }) {
   const [query, setQuery] = useState('')
+  const [selected, setSelected] = useState([])
+  const [confirming, setConfirming] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const pressTimer = useRef(null)
+  const justSelected = useRef(false)
+  const selecting = selected.length > 0
   const results = people.filter(person => `${person.name} ${person.relationship}`.toLowerCase().includes(query.toLowerCase()))
+
+  useEffect(() => () => {
+    if (pressTimer.current) clearTimeout(pressTimer.current)
+  }, [])
+
+  const cancelPress = () => {
+    if (pressTimer.current) {
+      clearTimeout(pressTimer.current)
+      pressTimer.current = null
+    }
+  }
+
+  const startPress = person => {
+    cancelPress()
+    pressTimer.current = window.setTimeout(() => {
+      pressTimer.current = null
+      justSelected.current = true
+      setConfirming(false)
+      setSelected(prev => prev.includes(person.id) ? prev : [...prev, person.id])
+      if (navigator.vibrate) navigator.vibrate(10)
+    }, 500)
+  }
+
+  const toggle = person => {
+    if (justSelected.current) {
+      justSelected.current = false
+      return
+    }
+    if (!selecting) {
+      onOpen(person)
+      return
+    }
+    setConfirming(false)
+    setSelected(prev => prev.includes(person.id) ? prev.filter(id => id !== person.id) : [...prev, person.id])
+  }
+
+  const exitSelect = () => {
+    cancelPress()
+    setSelected([])
+    setConfirming(false)
+  }
+
+  const removeSelected = async () => {
+    if (!confirming) {
+      setConfirming(true)
+      return
+    }
+    setDeleting(true)
+    try {
+      await onDelete(selected)
+    } finally {
+      setDeleting(false)
+    }
+    exitSelect()
+  }
+
   return (
     <main className="page">
-      <Header eyebrow={`${people.length} people in your circle`} title="Relationships" action={<button className="round-add" onClick={onCreate}><Plus size={20} /></button>} />
+      <Header
+        eyebrow={selecting ? `${selected.length} selected` : `${people.length} people in your circle`}
+        title="Relationships"
+        action={selecting
+          ? <button className="icon-button" aria-label="Done selecting" onClick={exitSelect}><X size={19} /></button>
+          : <button className="round-add" onClick={onCreate}><Plus size={20} /></button>}
+      />
       <label className="search-box"><Search size={18} /><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Find someone" /></label>
       <div className="filter-pills"><button className="active">Everyone</button><button>Family</button><button>Friends</button><button>Work</button></div>
+      {selecting && (
+        <div className="select-bar">
+          <span>{selected.length} {selected.length === 1 ? 'card' : 'cards'}</span>
+          <button className="primary-button" disabled={deleting} onClick={removeSelected}>{deleting ? 'Deleting…' : confirming ? 'Tap again to delete' : `Delete (${selected.length})`}</button>
+        </div>
+      )}
       <div className="card-grid">
-        {results.map(person => (
-          <button className="relationship-card" key={person.id} onClick={() => onOpen(person)}>
+        {results.map(person => {
+          const isSel = selected.includes(person.id)
+          return (
+          <button
+            className={`relationship-card ${isSel ? 'selected' : ''}`}
+            key={person.id}
+            onClick={() => toggle(person)}
+            onTouchStart={() => startPress(person)}
+            onTouchEnd={cancelPress}
+            onTouchMove={cancelPress}
+            onMouseDown={() => startPress(person)}
+            onMouseUp={cancelPress}
+            onMouseLeave={cancelPress}
+            onContextMenu={event => event.preventDefault()}
+          >
+            {selecting && <span className={`select-box ${isSel ? 'on' : ''}`}>{isSel && <Check size={13} />}</span>}
             <Avatar person={person} size="xl" />
             <span className="relationship-label">{person.relationship}</span>
             <h3>{person.name}</h3>
             <p>{person.memory}</p>
             <div className="next-pill"><CalendarDays size={14} /> {person.nextEvent}</div>
           </button>
-        ))}
-        {!results.length && <button className="empty-state empty-card" onClick={onCreate}><Plus size={20} /><strong>{query ? 'No people match that search' : 'Your circle is empty'}</strong><span>{query ? 'Try another name or relationship.' : 'Add someone, then Keepsake can start remembering with you.'}</span></button>}
+          )
+        })}
+        {!results.length && !selecting && <button className="empty-state empty-card" onClick={onCreate}><Plus size={20} /><strong>{query ? 'No people match that search' : 'Your circle is empty'}</strong><span>{query ? 'Try another name or relationship.' : 'Add someone, then Keepsake can start remembering with you.'}</span></button>}
       </div>
     </main>
   )
@@ -557,10 +646,12 @@ function AddPerson({ onCancel, onSave }) {
 function AddMemory({ people, onSaved, onImported }) {
   const [text, setText] = useState('')
   const [listening, setListening] = useState(false)
+  const [micNote, setMicNote] = useState('')
   const [review, setReview] = useState(false)
   const [preview, setPreview] = useState(null)
   const [previewState, setPreviewState] = useState('idle')
   const [excluded, setExcluded] = useState([])
+  const recognitionRef = useRef(null)
 
   const detected = useMemo(() => {
     const lower = text.toLowerCase()
@@ -593,12 +684,49 @@ function AddMemory({ people, onSaved, onImported }) {
       setText(prev => `${prev}${prev ? ' ' : ''}Maya mentioned that she wants to try the new Thai place next Friday.`)
       return
     }
+    // Second tap stops the current session instead of stacking a new one.
+    if (recognitionRef.current) {
+      recognitionRef.current.stop()
+      return
+    }
     const recognition = new SpeechRecognition()
+    recognition.lang = 'en-US'
     recognition.interimResults = false
-    recognition.onstart = () => setListening(true)
-    recognition.onend = () => setListening(false)
-    recognition.onresult = event => setText(prev => `${prev}${prev ? ' ' : ''}${event.results[0][0].transcript}`)
-    recognition.start()
+    recognition.maxAlternatives = 1
+    recognition.onstart = () => {
+      setListening(true)
+      setMicNote('')
+    }
+    recognition.onend = () => {
+      setListening(false)
+      recognitionRef.current = null
+    }
+    recognition.onerror = event => {
+      setListening(false)
+      recognitionRef.current = null
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        setMicNote('Microphone is blocked — allow it in the browser settings.')
+      } else if (event.error === 'no-speech') {
+        setMicNote('Did not catch that — try again.')
+      } else if (event.error === 'audio-capture') {
+        setMicNote('No microphone found on this device.')
+      } else if (event.error === 'network') {
+        setMicNote('Voice needs the secure site — use your https address, not the numbers one.')
+      } else {
+        setMicNote('Voice is not working right now — typing works too.')
+      }
+    }
+    recognition.onresult = event => {
+      setMicNote('')
+      setText(prev => `${prev}${prev ? ' ' : ''}${event.results[0][0].transcript}`)
+    }
+    recognitionRef.current = recognition
+    try {
+      recognition.start()
+    } catch {
+      setListening(false)
+      recognitionRef.current = null
+    }
   }
 
   if (review) {
@@ -654,8 +782,8 @@ function AddMemory({ people, onSaved, onImported }) {
       <div className="composer">
         <textarea autoFocus value={text} onChange={e => setText(e.target.value)} placeholder={'Start typing anything…\n\n“Maya loves sunflowers. Her interview is next Thursday. Jake is moving on Saturday…”'} />
         <div className="composer-footer">
-          <button className={`mic-button ${listening ? 'listening' : ''}`} onClick={listen}><Mic size={20} /> {listening ? 'Listening…' : 'Speak'}</button>
-          <span>{text.length} characters</span>
+          <button className={`mic-button ${listening ? 'listening' : ''}`} onClick={listen}><Mic size={20} /> {listening ? 'Listening… tap to stop' : 'Speak'}</button>
+          <span>{micNote || `${text.length} characters`}</span>
         </div>
       </div>
       {text && <div className="detection-hint"><Sparkles size={16} /><span>{detected.known.length ? `I recognize ${detected.known.map(p => p.name).join(', ')}` : 'I’ll look for people, dates, and memories'}</span></div>}
@@ -838,8 +966,22 @@ export default function App() {
     enableNotifications({ silent: true })
   }, [user, authReady, onboarding])
 
-  const addPerson = async (name, relationship) => {
+  const deletePeople = async ids => {
     try {
+      await Promise.all(ids.map(async id => {
+        const response = await fetch(`/api/people/${id}`, { method: 'DELETE' })
+        if (!response.ok) throw new Error('Could not delete yet')
+      }))
+      setPeople(prev => prev.filter(person => !ids.includes(person.id)))
+      setSelected(prev => (prev && ids.includes(prev.id) ? null : prev))
+      showToast(ids.length === 1 ? 'Removed from your circle' : `${ids.length} removed from your circle`)
+    } catch {
+      showToast('Could not delete yet')
+      throw new Error('Could not delete yet')
+    }
+  }
+
+  const addPerson = async (name, relationship) => {    try {
       const response = await fetch('/api/people', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -936,7 +1078,7 @@ export default function App() {
   else if (creating) content = <AddPerson onCancel={() => setCreating(false)} onSave={addPerson} />
   else if (tab === 'today') content = <Today onOpen={setSelected} onAdd={() => setTab('add')} onShowPeople={() => setTab('relationships')} user={user} onAccount={() => { setAuthError(''); setAccountOpen(true) }} comingUp={liveEvents} people={people} notificationState={notificationState} onNotifications={enableNotifications} />
   else if (tab === 'upcoming') content = <Upcoming events={liveEvents} />
-  else if (tab === 'relationships') content = <Relationships people={people} onOpen={setSelected} onCreate={() => setCreating(true)} />
+  else if (tab === 'relationships') content = <Relationships people={people} onOpen={setSelected} onCreate={() => setCreating(true)} onDelete={deletePeople} />
   else content = <AddMemory people={people} onImported={handleImport} onSaved={saveNote} />
 
   return (

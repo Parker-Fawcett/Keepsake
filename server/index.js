@@ -304,6 +304,22 @@ app.post('/api/people', async (request, response, next) => {
   }
 })
 
+app.delete('/api/people/:id', async (request, response, next) => {
+  try {
+    // Archiving keeps facts, dates, and notes intact for history while
+    // hiding the card everywhere. Nothing is hard-deleted.
+    const [archived] = await sql`
+      UPDATE people SET archived_at = now()
+      WHERE id = ${request.params.id} AND owner_id = ${ownerIdFor(request)} AND archived_at IS NULL
+      RETURNING id
+    `
+    if (!archived) return response.status(404).json({ error: 'Not found.' })
+    response.json({ ok: true })
+  } catch (error) {
+    next(error)
+  }
+})
+
 app.post('/api/notes', async (request, response, next) => {
   try {
     const rawText = String(request.body?.rawText || '').trim()
