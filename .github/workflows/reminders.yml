@@ -16,7 +16,7 @@ concurrency:
 jobs:
   deliver:
     if: ${{ github.event_name == 'workflow_dispatch' || vars.REMINDERS_ENABLED == 'true' }}
-    runs-on: ubuntu-slim
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
