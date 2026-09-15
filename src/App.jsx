@@ -549,13 +549,22 @@ function Upcoming({ events }) {
 
 function Relationships({ people, onOpen, onCreate, onDelete }) {
   const [query, setQuery] = useState('')
+  const [filter, setFilter] = useState('Everyone')
   const [selected, setSelected] = useState([])
   const [confirming, setConfirming] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const pressTimer = useRef(null)
   const justSelected = useRef(false)
   const selecting = selected.length > 0
-  const results = people.filter(person => `${person.name} ${person.relationship}`.toLowerCase().includes(query.toLowerCase()))
+  const filters = {
+    Everyone: () => true,
+    Family: person => person.relationship === 'Family' || person.relationship === 'Partner',
+    Friends: person => person.relationship === 'Friend',
+    Work: person => person.relationship === 'Work',
+  }
+  const results = people.filter(
+    person => filters[filter](person) && `${person.name} ${person.relationship}`.toLowerCase().includes(query.toLowerCase()),
+  )
 
   useEffect(() => () => {
     if (pressTimer.current) clearTimeout(pressTimer.current)
@@ -622,7 +631,7 @@ function Relationships({ people, onOpen, onCreate, onDelete }) {
           : <button className="round-add" onClick={onCreate}><Plus size={20} /></button>}
       />
       <label className="search-box"><Search size={18} /><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Find someone" /></label>
-      <div className="filter-pills"><button className="active">Everyone</button><button>Family</button><button>Friends</button><button>Work</button></div>
+      <div className="filter-pills">{['Everyone', 'Family', 'Friends', 'Work'].map(name => <button key={name} className={filter === name ? 'active' : ''} onClick={() => setFilter(name)}>{name}</button>)}</div>
       {selecting && (
         <div className="select-bar">
           <span>{selected.length} {selected.length === 1 ? 'card' : 'cards'}</span>
