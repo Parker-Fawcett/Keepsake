@@ -157,6 +157,18 @@ app.delete('/api/push-tokens', async (request, response, next) => {
   }
 })
 
+app.delete('/api/auth/account', async (request, response, next) => {
+  try {
+    // Sessions, people, notes, facts, dates, reminders, tokens, and linked
+    // accounts all cascade from the user row.
+    await clearSession(request, response)
+    await sql`DELETE FROM users WHERE id = ${request.user.id}`
+    response.json({ ok: true })
+  } catch (error) {
+    next(error)
+  }
+})
+
 const OAUTH_STATE_COOKIE = 'keepsake_oauth_state'
 const googleConfigured = () => isGoogleConfigured() && (process.env.NODE_ENV !== 'production' || hasTokenEncryptionKey())
 

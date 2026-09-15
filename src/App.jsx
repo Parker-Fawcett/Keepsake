@@ -273,11 +273,12 @@ function Header({ eyebrow, title, action }) {
   )
 }
 
-function AuthModal({ user, onClose, onAuth, onLogout, authError, onClearError, required = false }) {
+function AuthModal({ user, onClose, onAuth, onLogout, onDeleteAccount, authError, onClearError, required = false }) {
   const [mode, setMode] = useState('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [displayName, setDisplayName] = useState('')
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
   const accountExists = authError?.toLowerCase().includes('already registered')
 
   useEffect(() => {
@@ -296,6 +297,12 @@ function AuthModal({ user, onClose, onAuth, onLogout, authError, onClearError, r
           ? <>
             <p className="intro">Signed in as {user.email || user.display_name}. Your notes and people save to your account on this device and server.</p>
             <button className="primary-button wide" onClick={onLogout}>Sign out</button>
+            {!confirmingDelete
+              ? <button className="text-button auth-danger" onClick={() => setConfirmingDelete(true)}>Delete my account</button>
+              : <>
+                <p className="auth-error">This permanently deletes your circle, notes, and reminders.</p>
+                <button className="text-button auth-danger" onClick={() => { setConfirmingDelete(false); onDeleteAccount?.() }}>Yes, delete everything</button>
+              </>}
           </>
           : <>
             <p className="intro">One account keeps your circle in sync. Nothing here is shared or scraped.</p>
@@ -693,6 +700,21 @@ export default function App() {
     showToast('Signed out on this device')
   }
 
+  const handleDeleteAccount = async () => {
+    try {
+      const response = await fetch('/api/auth/account', { method: 'DELETE' })
+      if (!response.ok) throw new Error('Could not delete that account yet.')
+    } catch {
+      showToast('Could not delete that account yet.')
+      return
+    }
+    setUser(null)
+    setPeople([])
+    setNotificationState('idle')
+    setAccountOpen(false)
+    showToast('Your account and everything in it is deleted')
+  }
+
   useEffect(() => {
     refreshMe()
   }, [])
@@ -858,7 +880,7 @@ export default function App() {
       <div className="brand-rail"><div className="brand-mark"><Heart size={18} fill="currentColor" /></div><span>Keepsake</span></div>
       <div className="app-content">{content}</div>
       {!selected && !creating && <nav className="tab-bar">{tabs.map(item => { const Icon = item.icon; return <button key={item.id} className={tab === item.id ? 'active' : ''} onClick={() => setTab(item.id)}><span className={item.id === 'add' ? 'add-tab-icon' : ''}><Icon size={21} /></span><small>{item.label}</small></button> })}</nav>}
-      {accountOpen && <AuthModal user={user} authError={authError} onClearError={() => setAuthError('')} onClose={() => setAccountOpen(false)} onAuth={handleAuth} onLogout={handleLogout} />}
+      {accountOpen && <AuthModal user={user} authError={authError} onClearError={() => setAuthError('')} onClose={() => setAccountOpen(false)} onAuth={handleAuth} onLogout={handleLogout} onDeleteAccount={handleDeleteAccount} />}
       {toast && <div className="toast"><Check size={16} /> {toast}</div>}
     </div>
   )

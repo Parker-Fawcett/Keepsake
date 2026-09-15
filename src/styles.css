@@ -252,6 +252,7 @@ button { color: inherit; }
 .auth-field input { border: 0; border-bottom: 1px solid var(--ink); background: transparent; outline: 0; padding: 11px 1px; font-size: 13px; }
 .auth-error { color: var(--brick); font-size: 11px; margin: 4px 0 0; }
 .auth-switch { margin: 12px auto 0; display: block; }
+.auth-danger { color: var(--brick); margin: 16px auto 0; display: block; border-bottom: 1px solid currentColor; padding: 3px 0; }
 .auth-required { background: var(--paper); }
 .auth-required .auth-sheet { margin: auto; }
 .auth-loading { padding: 0; display: grid; place-content: center; justify-items: center; gap: 12px; color: var(--forest); font: 500 9px/1 var(--mono); letter-spacing: .5px; }
