@@ -141,16 +141,41 @@ function ImportSources({ onImported, compact = false }) {
   }
 
   const importPhoneContacts = async () => {
-    if (navigator.contacts?.select) {
-      try {
-        const contacts = await navigator.contacts.select(['name', 'email', 'tel'], { multiple: true })
-        onImported('Phone contacts', contacts.length)
-      } catch {
-        // The user closed the native contact picker.
-      }
+    if (!navigator.contacts?.select) {
+      onImported('Phone contacts', 0, 'Phone contact access will be available in the installed mobile app.')
       return
     }
-    onImported('Phone contacts', 0, 'Phone contact access will be available in the installed mobile app.')
+    let picked
+    try {
+      picked = await navigator.contacts.select(['name', 'email', 'tel'], { multiple: true })
+    } catch {
+      // The user closed the native contact picker.
+      return
+    }
+    const first = value => (Array.isArray(value) ? value[0] : value || '').trim()
+    const records = picked.map(contact => {
+      const name = first(contact.name)
+      if (!name) return null
+      const record = { name }
+      if (first(contact.email)) record.email = first(contact.email)
+      if (first(contact.tel)) record.phone = first(contact.tel)
+      return record
+    }).filter(Boolean).map((record, _idx) => ({ ...record, _idx }))
+    if (!records.length) {
+      onImported('Phone contacts', 0, 'No usable contacts selected.')
+      return
+    }
+    try {
+      const response = await fetch('/api/imports/review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: 'Phone contacts', records }),
+      })
+      if (!response.ok) throw new Error('Review unavailable.')
+      setReview({ source: 'Phone contacts', records, result: await response.json() })
+    } catch {
+      onImported('Phone contacts', 0, 'Could not review those contacts yet.')
+    }
   }
 
   const confirmImport = async resolutions => {
@@ -611,6 +636,7 @@ function AddMemory({ people, onSaved, onImported }) {
         {dateRows.map(date => <article className="review-card" key={date}><div className="review-check"><Check size={15} /></div><div className="review-symbol"><CalendarDays size={18} /></div><div><small>Possible date</small><strong>{date}</strong><span>Suggest a reminder</span></div></article>)}
       </section>
       <button className="primary-button wide sticky-save" onClick={() => { const savedText = text; const savedExtraction = preview; setText(''); setReview(false); setPreview(null); setPreviewState('idle'); onSaved(savedText, savedExtraction) }}><Sparkles size={17} /> Add to Keepsake</button>
+      {previewState === 'ready' && reviewPeople.length === 1 && reviewPeople[0].name === 'New person' && <p className="empty-line review-hint">No names in this note, so it saves as-is. Mention someone by name and they will get a card.</p>}
     </main>
     )
   }
@@ -720,27 +746,32 @@ export default function App() {
     showToast('Your account and everything in it is deleted')
   }
 
+  const reloadPeople = async () => {
+    try {
+      const response = await fetch('/api/people')
+      if (!response.ok) return
+      const { people: savedPeople } = await response.json()
+      setPeople((savedPeople || []).map(person => ({
+        ...person,
+        initials: person.name[0].toUpperCase(),
+        nextEvent: 'Nothing scheduled yet',
+        memory: 'A new person in your circle',
+        likes: [],
+        dates: [],
+        notes: [],
+      })))
+    } catch {
+      // The circle keeps showing what it already has while offline.
+    }
+  }
+
   useEffect(() => {
     refreshMe()
   }, [])
 
   useEffect(() => {
     if (!user) return
-    fetch('/api/people')
-      .then(response => response.ok ? response.json() : Promise.reject(new Error('Could not load people')))
-      .then(({ people: savedPeople }) => {
-        const hydrated = (savedPeople || []).map(person => ({
-          ...person,
-          initials: person.name[0].toUpperCase(),
-          nextEvent: 'Nothing scheduled yet',
-          memory: 'A new person in your circle',
-          likes: [],
-          dates: [],
-          notes: [],
-        }))
-        setPeople(hydrated)
-      })
-      .catch(() => showToast('Working offline — changes may not sync'))
+    reloadPeople().catch(() => showToast('Working offline — changes may not sync'))
   }, [user])
 
   useEffect(() => {
@@ -820,6 +851,7 @@ export default function App() {
     } catch {
       showToast('Import saved locally for now')
     }
+    reloadPeople()
   }
 
   const saveNote = async (rawText, reviewedExtraction = null) => {
@@ -845,9 +877,14 @@ export default function App() {
           body: JSON.stringify({ people: peoplePayload, facts, dates }),
         })
         if (!confirm.ok) throw new Error('Could not confirm note')
+        const { people: newCards } = await confirm.json()
+        reloadPeople()
+        setTab('today')
+        showToast(newCards?.length ? `${newCards.length} ${newCards.length === 1 ? 'person' : 'people'} added to your circle` : 'Your note is safely stored')
+      } else {
+        setTab('today')
+        showToast('Your note is safely stored')
       }
-      setTab('today')
-      showToast('Your note is safely stored')
     } catch {
       showToast('Could not save that note yet')
     }

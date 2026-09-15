@@ -135,6 +135,7 @@ button { color: inherit; }
 .quick-note button { border: 0; background: var(--forest); color: white; width: 38px; display: grid; place-items: center; cursor: pointer; }
 .notes-list article { display: flex; gap: 10px; padding: 12px 2px; border-bottom: 1px solid var(--line); color: var(--brick); }
 .empty-line { color: var(--muted); font: 400 9px/1.5 var(--mono); margin: 6px 0 0; }
+.review-hint { text-align: center; margin-top: 12px; }
 .notes-list p { color: #55534c; font-size: 10px; line-height: 1.5; margin: 0; }
 
 .intro { color: var(--muted); font-size: 12px; line-height: 1.6; margin: -8px 0 20px; }
