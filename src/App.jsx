@@ -284,6 +284,13 @@ function Onboarding({ onComplete, onImported }) {
 }
 
 function Avatar({ person, size = 'md' }) {
+  if (person.avatar_url) {
+    return (
+      <div className={`avatar avatar-${size} avatar-photo`}>
+        <img src={person.avatar_url} alt="" />
+      </div>
+    )
+  }
   return (
     <div className={`avatar avatar-${size}`} style={{ background: person.color }}>
       {person.initials}
@@ -660,10 +667,21 @@ function formatStoredDate(date) {
   return `${month} ${date.day}${date.year ? `, ${date.year}` : ''}`
 }
 
-function PersonDetail({ person, onBack }) {
+function PersonDetail({ person, onBack, onPhoto }) {
   const [note, setNote] = useState('')
   const [localNotes, setLocalNotes] = useState([])
   const [live, setLive] = useState(null)
+  const [photoError, setPhotoError] = useState('')
+  const [showDateForm, setShowDateForm] = useState(false)
+  const [dateLabel, setDateLabel] = useState('Birthday')
+  const [dateMonth, setDateMonth] = useState(1)
+  const [dateDay, setDateDay] = useState(1)
+  const [dateYear, setDateYear] = useState('')
+  const [dateError, setDateError] = useState('')
+  const [showLikeForm, setShowLikeForm] = useState(false)
+  const [likeValue, setLikeValue] = useState('')
+  const [likeError, setLikeError] = useState('')
+  const photoInput = useRef(null)
   useEffect(() => {
     fetch(`/api/people/${person.id}/details`)
       .then(response => response.ok ? response.json() : Promise.reject(new Error('offline')))
@@ -675,6 +693,80 @@ function PersonDetail({ person, onBack }) {
     setLocalNotes(prev => [note.trim(), ...prev])
     setNote('')
   }
+  const pickPhoto = event => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      setPhotoError('Pick an image file.')
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = async () => {
+      const dataUrl = String(reader.result || '')
+      if (dataUrl.length > 700000) {
+        setPhotoError('That photo is too big — try a smaller one.')
+        return
+      }
+      setPhotoError('')
+      try {
+        const response = await fetch(`/api/people/${person.id}/avatar`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dataUrl }),
+        })
+        if (!response.ok) throw new Error('Could not save that photo.')
+        const { person: updated } = await response.json()
+        setLive(prev => (prev ? { ...prev, person: { ...prev.person, avatar_url: updated.avatar_url } } : prev))
+        onPhoto?.(person.id, updated.avatar_url)
+      } catch {
+        setPhotoError('Could not save that photo.')
+      }
+    }
+    reader.readAsDataURL(file)
+  }
+  const saveDate = async () => {
+    setDateError('')
+    try {
+      const response = await fetch(`/api/people/${person.id}/dates`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          label: dateLabel.trim(),
+          month: Number(dateMonth),
+          day: Number(dateDay),
+          year: dateYear.trim() === '' ? null : Number(dateYear),
+        }),
+      })
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload.error || 'Could not save that date.')
+      setLive(prev => (prev ? { ...prev, dates: [...prev.dates, payload.date] } : prev))
+      setShowDateForm(false)
+      setDateYear('')
+    } catch (error) {
+      setDateError(error.message)
+    }
+  }
+  const saveLike = async () => {
+    setLikeError('')
+    const value = likeValue.trim()
+    if (!value) return
+    try {
+      const response = await fetch(`/api/people/${person.id}/facts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category: 'like', value }),
+      })
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload.error || 'Could not save that.')
+      setLive(prev => (prev ? { ...prev, facts: [...prev.facts, payload.fact] } : prev))
+      setLikeValue('')
+      setShowLikeForm(false)
+    } catch (error) {
+      setLikeError(error.message)
+    }
+  }
+  const displayPerson = { ...person, avatar_url: live?.person?.avatar_url || person.avatar_url }
   const dates = live ? live.dates.map(date => ({ label: date.label, value: formatStoredDate(date) })) : person.dates
   const likes = live ? live.facts.filter(fact => fact.category === 'like').map(fact => fact.value) : person.likes
   const notes = [...localNotes, ...(live ? live.notes.map(entry => entry.raw_text) : person.notes)]
@@ -682,18 +774,40 @@ function PersonDetail({ person, onBack }) {
     <main className="page detail-page">
       <button className="back-button" onClick={onBack}><ChevronLeft size={18} /> People</button>
       <div className="profile-hero">
-        <Avatar person={person} size="xxl" />
+        <input ref={photoInput} className="hidden-file" type="file" accept="image/*" onChange={pickPhoto} />
+        <button className="profile-photo-button" onClick={() => photoInput.current?.click()} aria-label={`Change photo for ${person.name}`}>
+          <Avatar person={displayPerson} size="xxl" />
+        </button>
+        {photoError && <p className="auth-error">{photoError}</p>}
         <span>{person.relationship}</span>
         <h1>{person.name}</h1>
         <p>{person.memory}</p>
       </div>
       <section className="detail-section">
-        <div className="section-heading"><h2>Important dates</h2><button className="tiny-add"><Plus size={15} /> Add</button></div>
+        <div className="section-heading"><h2>Important dates</h2><button className="tiny-add" onClick={() => { setDateError(''); setShowDateForm(current => !current) }}><Plus size={15} /> Add</button></div>
+        {showDateForm && (
+          <div className="inline-form">
+            <label className="auth-field"><span>Label</span><input value={dateLabel} onChange={e => setDateLabel(e.target.value)} placeholder="Birthday" /></label>
+            <div className="inline-row">
+              <label className="auth-field"><span>Month</span><select value={dateMonth} onChange={e => setDateMonth(e.target.value)}>{detailMonths.map((name, i) => <option key={name} value={i + 1}>{name}</option>)}</select></label>
+              <label className="auth-field"><span>Day</span><select value={dateDay} onChange={e => setDateDay(e.target.value)}>{Array.from({ length: 31 }, (_, i) => i + 1).map(day => <option key={day} value={day}>{day}</option>)}</select></label>
+              <label className="auth-field"><span>Year (optional)</span><input inputMode="numeric" value={dateYear} onChange={e => setDateYear(e.target.value.replace(/[^0-9]/g, '').slice(0, 4))} placeholder="—" /></label>
+            </div>
+            {dateError && <p className="auth-error">{dateError}</p>}
+            <button className="primary-button wide" onClick={saveDate}>Save date</button>
+          </div>
+        )}
         {dates.map(date => <div className="info-row" key={date.label}><span className="info-icon rose"><CalendarDays size={17} /></span><div><small>{date.label}</small><strong>{date.value}</strong></div><Bell size={16} /></div>)}
-        {dates.length === 0 && <p className="empty-line">Nothing saved yet.</p>}
+        {dates.length === 0 && !showDateForm && <p className="empty-line">Nothing saved yet.</p>}
       </section>
       <section className="detail-section">
-        <div className="section-heading"><h2>Little things they love</h2><button className="tiny-add"><Plus size={15} /> Add</button></div>
+        <div className="section-heading"><h2>Little things they love</h2><button className="tiny-add" onClick={() => { setLikeError(''); setShowLikeForm(current => !current) }}><Plus size={15} /> Add</button></div>
+        {showLikeForm && (
+          <div className="inline-form">
+            <div className="quick-note"><input value={likeValue} onChange={e => setLikeValue(e.target.value)} onKeyDown={e => e.key === 'Enter' && saveLike()} placeholder="Sunflowers, Thai food…" /><button onClick={saveLike} aria-label="Save"><Plus size={18} /></button></div>
+            {likeError && <p className="auth-error">{likeError}</p>}
+          </div>
+        )}
         <div className="tag-list">{likes.map(like => <span key={like}>{like}</span>)}</div>
         {likes.length === 0 && <p className="empty-line">Nothing saved yet — it arrives here from your notes.</p>}
       </section>
@@ -1154,7 +1268,7 @@ export default function App() {
   )
 
   let content
-  if (selected) content = <PersonDetail person={selected} onBack={() => setSelected(null)} />
+  if (selected) content = <PersonDetail person={selected} onBack={() => setSelected(null)} onPhoto={(id, avatar_url) => setPeople(prev => prev.map(entry => entry.id === id ? { ...entry, avatar_url } : entry))} />
   else if (creating) content = <AddPerson onCancel={() => setCreating(false)} onSave={addPerson} />
   else if (tab === 'today') content = <Today onOpen={setSelected} onAdd={() => setTab('add')} onShowPeople={() => setTab('relationships')} user={user} onAccount={() => { setAuthError(''); setAccountOpen(true) }} comingUp={liveEvents} people={people} checkins={quietPeople} notificationState={notificationState} onNotifications={enableNotifications} />
   else if (tab === 'upcoming') content = <Upcoming events={liveEvents} />

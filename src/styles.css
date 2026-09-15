@@ -61,6 +61,11 @@ button { color: inherit; }
 .person-tile { border: 0; border-right: 1px solid var(--line); background: transparent; cursor: pointer; padding: 17px 6px 15px; min-width: 0; display: flex; align-items: center; flex-direction: column; }
 .person-tile:last-child { border-right: 0; }
 .avatar { display: grid; place-items: center; color: white; font-family: var(--display); box-shadow: inset 0 0 0 1px rgba(255,255,255,.25); }
+.avatar-photo { overflow: hidden; padding: 0; }
+.avatar-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.profile-photo-button { border: 0; background: transparent; padding: 0; cursor: pointer; }
+.profile-photo-button .avatar-xxl { outline: 2px dashed transparent; outline-offset: 4px; }
+.profile-photo-button:active .avatar-xxl { outline-color: var(--forest); }
 .avatar-md { width: 40px; height: 40px; font-size: 17px; }
 .avatar-lg { width: 58px; height: 64px; border-radius: 50% 50% 44% 44%; font-size: 23px; }
 .avatar-xl { width: 68px; height: 74px; border-radius: 50% 50% 43% 43%; font-size: 26px; }
@@ -261,6 +266,10 @@ button { color: inherit; }
 .auth-field { display: flex; flex-direction: column; gap: 7px; margin: 12px 0; }
 .auth-field span { font: 500 8px/1 var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .8px; }
 .auth-field input { border: 0; border-bottom: 1px solid var(--ink); background: transparent; outline: 0; padding: 11px 1px; font-size: 13px; }
+.auth-field select { border: 0; border-bottom: 1px solid var(--ink); background: transparent; outline: 0; padding: 11px 1px; font-size: 13px; color: inherit; }
+.inline-form { border: 1px solid var(--ink); background: var(--sheet); box-shadow: 4px 4px 0 #d7cfc1; padding: 16px 16px 18px; margin-bottom: 14px; }
+.inline-form .primary-button { margin-top: 6px; }
+.inline-row { display: grid; grid-template-columns: 1fr 70px 90px; gap: 12px; }
 .auth-error { color: var(--brick); font-size: 11px; margin: 4px 0 0; }
 .auth-switch { margin: 12px auto 0; display: block; }
 .auth-danger { color: var(--brick); margin: 16px auto 0; display: block; border-bottom: 1px solid currentColor; padding: 3px 0; }

@@ -7,14 +7,14 @@ import { sql } from './db.js'
 import { extractRelationships } from './extract.js'
 import { buildImportReview, MAX_REVIEW_RECORDS, validateImportConfirm } from './imports.js'
 import { buildAuthUrl, exchangeCode, fetchConnections, isGoogleConfigured, redirectUriFor, refreshAccessToken } from './google.js'
-import { validateConfirmPayload } from './confirm.js'
+import { validateConfirmPayload, FACT_CATEGORIES, validateDateFields } from './confirm.js'
 import { rateLimit } from './ratelimit.js'
 import { buildRemindersForDate, DEFAULT_REMINDER_RULES } from './reminders.js'
 import { buildWeeklyReview } from './digest.js'
 import { handleMcpRequest } from './mcp.js'
 import { randomBytes } from 'node:crypto'
 import { decryptSecret, encryptSecret, hasTokenEncryptionKey, isEncryptedSecret } from './secrets.js'
-import { isValidEmail, isValidImportSource, isValidName, isValidNoteText, isValidOptionalEmail, isValidOptionalPhone, isValidPassword, isValidPushPlatform, isValidPushToken, normalizeEmail } from './validate.js'
+import { isValidAvatarDataUrl, isValidEmail, isValidImportSource, isValidName, isValidNoteText, isValidOptionalEmail, isValidOptionalPhone, isValidPassword, isValidPushPlatform, isValidPushToken, normalizeEmail } from './validate.js'
 
 const app = express()
 const port = Number(process.env.PORT || 5173)
@@ -660,6 +660,72 @@ app.get('/api/people/:id/details', async (request, response, next) => {
       ORDER BY notes.created_at DESC LIMIT 20
     `
     response.json({ person, facts, dates, reminders, notes })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/people/:id/avatar', async (request, response, next) => {
+  try {
+    const dataUrl = String(request.body?.dataUrl || '')
+    if (!isValidAvatarDataUrl(dataUrl)) {
+      return response.status(400).json({ error: 'Send a PNG, JPEG, WebP, or GIF photo under about 700KB.' })
+    }
+    const [updated] = await sql`
+      UPDATE people SET avatar_url = ${dataUrl}
+      WHERE id = ${request.params.id} AND owner_id = ${ownerIdFor(request)} AND archived_at IS NULL
+      RETURNING id, avatar_url
+    `
+    if (!updated) return response.status(404).json({ error: 'Not found.' })
+    response.json({ person: updated })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/people/:id/dates', async (request, response, next) => {
+  try {
+    const ownerId = ownerIdFor(request)
+    const [person] = await sql`SELECT id, name FROM people WHERE id = ${request.params.id} AND owner_id = ${ownerId} AND archived_at IS NULL`
+    if (!person) return response.status(404).json({ error: 'Not found.' })
+    const checked = validateDateFields(request.body)
+    if (!checked.ok) return response.status(400).json({ error: checked.errors[0], errors: checked.errors })
+    const { date } = checked
+    const [row] = await sql`
+      INSERT INTO important_dates (person_id, label, month, day, year, recurs_yearly, confidence, confirmed_at)
+      VALUES (${person.id}, ${date.label}, ${date.month}, ${date.day}, ${date.year}, ${date.recursYearly}, ${date.confidence}, now())
+      RETURNING id, label, month, day, year, recurs_yearly
+    `
+    const reminders = []
+    for (const item of buildRemindersForDate({ personName: person.name, ...date }, DEFAULT_REMINDER_RULES, new Date())) {
+      const [reminder] = await sql`
+        INSERT INTO reminders (owner_id, person_id, important_date_id, title, remind_at)
+        VALUES (${ownerId}, ${person.id}, ${row.id}, ${item.title}, ${item.remindAt.toISOString()})
+        RETURNING id, title, remind_at
+      `
+      reminders.push(reminder)
+    }
+    response.status(201).json({ date: row, reminders })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/people/:id/facts', async (request, response, next) => {
+  try {
+    const ownerId = ownerIdFor(request)
+    const [person] = await sql`SELECT id FROM people WHERE id = ${request.params.id} AND owner_id = ${ownerId} AND archived_at IS NULL`
+    if (!person) return response.status(404).json({ error: 'Not found.' })
+    const category = String(request.body?.category || 'like')
+    const value = String(request.body?.value || '').trim()
+    if (!FACT_CATEGORIES.includes(category)) return response.status(400).json({ error: 'Pick a valid category.' })
+    if (!value || value.length > 2000) return response.status(400).json({ error: 'Write something between 1 and 2000 characters.' })
+    const [fact] = await sql`
+      INSERT INTO facts (person_id, category, value, confidence, confirmed_at)
+      VALUES (${person.id}, ${category}, ${value}, 1, now())
+      RETURNING id, category, value
+    `
+    response.status(201).json({ fact })
   } catch (error) {
     next(error)
   }

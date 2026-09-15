@@ -16,6 +16,33 @@ function isIntIn(value, min, max) {
   return Number.isInteger(value) && value >= min && value <= max
 }
 
+// Validates a single important date the way the confirm payload does,
+// so the manual add-date form shares the exact same rules.
+export function validateDateFields(entry) {
+  if (!entry || typeof entry !== 'object') return { ok: false, errors: ['Send a date with a label, month, and day.'] }
+  const label = String(entry.label || '').trim()
+  if (!label || label.length > 100) return { ok: false, errors: ['Give the date a label between 1 and 100 characters.'] }
+  if (!isIntIn(entry.month, 1, 12) || !isIntIn(entry.day, 1, 31)) {
+    return { ok: false, errors: ['Give the date a month from 1 to 12 and a day from 1 to 31.'] }
+  }
+  if (entry.year !== null && entry.year !== undefined && entry.year !== '' && !Number.isInteger(entry.year)) {
+    return { ok: false, errors: ['The year must be a whole number or left blank.'] }
+  }
+  const confidence = entry.confidence ?? 1
+  if (!isConfidence(confidence)) return { ok: false, errors: ['Confidence must sit between 0 and 1.'] }
+  return {
+    ok: true,
+    date: {
+      label,
+      month: entry.month,
+      day: entry.day,
+      year: entry.year === '' || entry.year === undefined ? null : entry.year,
+      recursYearly: entry.recursYearly !== false,
+      confidence,
+    },
+  }
+}
+
 export function validateConfirmPayload(payload) {
   const errors = []
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
@@ -93,33 +120,12 @@ export function validateConfirmPayload(payload) {
     }
     const ref = personRef(entry.person, 'Date', index)
     if (ref === null) return
-    const label = String(entry.label || '').trim()
-    if (!label || label.length > 100) {
-      errors.push(`Date ${index} needs a label between 1 and 100 characters.`)
+    const checked = validateDateFields(entry)
+    if (!checked.ok) {
+      errors.push(`Date ${index}: ${checked.errors[0]}`)
       return
     }
-    if (!isIntIn(entry.month, 1, 12) || !isIntIn(entry.day, 1, 31)) {
-      errors.push(`Date ${index} needs a month from 1 to 12 and a day from 1 to 31.`)
-      return
-    }
-    if (entry.year !== null && entry.year !== undefined && !Number.isInteger(entry.year)) {
-      errors.push(`Date ${index} has a year that is not an integer.`)
-      return
-    }
-    const confidence = entry.confidence ?? 1
-    if (!isConfidence(confidence)) {
-      errors.push(`Date ${index} has a confidence outside 0 to 1.`)
-      return
-    }
-    dates.push({
-      person: ref,
-      label,
-      month: entry.month,
-      day: entry.day,
-      year: entry.year ?? null,
-      recursYearly: entry.recursYearly !== false,
-      confidence,
-    })
+    dates.push({ person: ref, ...checked.date })
   })
 
   if (errors.length) return { ok: false, errors }

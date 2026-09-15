@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { validateConfirmPayload } from '../confirm.js'
+import { validateConfirmPayload, validateDateFields } from '../confirm.js'
 
 const VALID = {
   people: [{ name: 'Maya', relationship: 'Friend', confidence: 0.9 }],
@@ -49,5 +49,21 @@ describe('validateConfirmPayload', () => {
   it('rejects a non-object payload', () => {
     expect(validateConfirmPayload(null).ok).toBe(false)
     expect(validateConfirmPayload('note').ok).toBe(false)
+  })
+})
+
+describe('validateDateFields', () => {
+  it('normalizes a complete date', () => {
+    expect(validateDateFields({ label: ' Birthday ', month: 3, day: 12, year: 2020, recursYearly: false })).toEqual({
+      ok: true,
+      date: { label: 'Birthday', month: 3, day: 12, year: 2020, recursYearly: false, confidence: 1 },
+    })
+  })
+
+  it('rejects bad months, days, labels, and years', () => {
+    expect(validateDateFields({ label: 'X', month: 13, day: 1 }).ok).toBe(false)
+    expect(validateDateFields({ label: 'X', month: 1, day: 32 }).ok).toBe(false)
+    expect(validateDateFields({ label: '  ', month: 1, day: 1 }).ok).toBe(false)
+    expect(validateDateFields({ label: 'X', month: 1, day: 1, year: 20.5 }).ok).toBe(false)
   })
 })

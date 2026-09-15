@@ -47,3 +47,10 @@ export function isValidPushToken(token) {
 export function isValidPushPlatform(platform) {
   return platform === 'web' || platform === 'ios' || platform === 'android'
 }
+
+export const MAX_AVATAR_DATA_URL_LENGTH = 700000
+
+export function isValidAvatarDataUrl(value) {
+  if (typeof value !== 'string' || value.length > MAX_AVATAR_DATA_URL_LENGTH) return false
+  return /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(value)
+}

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  isValidAvatarDataUrl,
   isValidEmail,
   isValidImportSource,
   isValidName,
@@ -80,5 +81,13 @@ describe('input validators', () => {
     expect(isValidPushPlatform('android')).toBe(true)
     expect(isValidPushPlatform('carrier-pigeon')).toBe(false)
     expect(isValidPushPlatform('')).toBe(false)
+  })
+
+  it('only accepts small image data URLs as avatars', () => {
+    expect(isValidAvatarDataUrl('')).toBe(false)
+    expect(isValidAvatarDataUrl('https://example.com/photo.png')).toBe(false)
+    expect(isValidAvatarDataUrl('data:text/plain;base64,abcd')).toBe(false)
+    expect(isValidAvatarDataUrl('data:image/png;base64,iVBORw0KGgo=')).toBe(true)
+    expect(isValidAvatarDataUrl(`data:image/jpeg;base64,${'a'.repeat(700001)}`)).toBe(false)
   })
 })
