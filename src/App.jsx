@@ -560,6 +560,7 @@ function AddMemory({ people, onSaved, onImported }) {
   const [review, setReview] = useState(false)
   const [preview, setPreview] = useState(null)
   const [previewState, setPreviewState] = useState('idle')
+  const [excluded, setExcluded] = useState([])
 
   const detected = useMemo(() => {
     const lower = text.toLowerCase()
@@ -572,6 +573,7 @@ function AddMemory({ people, onSaved, onImported }) {
     setReview(true)
     setPreview(null)
     setPreviewState('loading')
+    setExcluded([])
     fetch('/api/extract/preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -623,19 +625,23 @@ function AddMemory({ people, onSaved, onImported }) {
       <div className="review-source"><span>Original note</span><p>{text}</p></div>
       {previewState === 'loading' && <div className="detection-hint"><Sparkles size={16} /><span>Reading your note against your circle…</span></div>}
       <section className="review-list">
-        {reviewPeople.map(person => (
-          <article className="review-card" key={person.name}>
-            <div className="review-check"><Check size={15} /></div><Avatar person={person} />
-            <div><small>Person</small><strong>{person.name}</strong><span>{person.sub}</span></div>
+        {reviewPeople.map(person => {
+          const isFallback = person.name === 'New person'
+          const off = !isFallback && excluded.includes(person.name)
+          return (
+          <article className={`review-card ${off ? 'excluded' : ''}`} key={person.name} onClick={() => !isFallback && setExcluded(prev => off ? prev.filter(name => name !== person.name) : [...prev, person.name])} role={isFallback ? undefined : 'button'} tabIndex={isFallback ? undefined : 0} onKeyDown={event => { if (!isFallback && (event.key === 'Enter' || event.key === ' ')) setExcluded(prev => off ? prev.filter(name => name !== person.name) : [...prev, person.name]) }}>
+            <div className={`review-check ${off ? 'off' : ''}`}>{!off && <Check size={15} />}</div><Avatar person={person} />
+            <div><small>Person</small><strong>{person.name}</strong><span>{off ? 'Skipped — tap to include' : person.sub}</span></div>
           </article>
-        ))}
+          )
+        })}
         <article className="review-card">
           <div className="review-check"><Check size={15} /></div><div className="review-symbol"><Lightbulb size={18} /></div>
           <div><small>Memory</small><strong>Save this note</strong><span>Add to the related people</span></div>
         </article>
         {dateRows.map(date => <article className="review-card" key={date}><div className="review-check"><Check size={15} /></div><div className="review-symbol"><CalendarDays size={18} /></div><div><small>Possible date</small><strong>{date}</strong><span>Suggest a reminder</span></div></article>)}
       </section>
-      <button className="primary-button wide sticky-save" onClick={() => { const savedText = text; const savedExtraction = preview; setText(''); setReview(false); setPreview(null); setPreviewState('idle'); onSaved(savedText, savedExtraction) }}><Sparkles size={17} /> Add to Keepsake</button>
+      <button className="primary-button wide sticky-save" onClick={() => { const savedText = text; const savedExtraction = preview; const included = previewPeople && previewPeople.length ? previewPeople.filter(person => person.name !== 'New person' && !excluded.includes(person.name)).map(person => person.name) : null; setText(''); setReview(false); setPreview(null); setPreviewState('idle'); setExcluded([]); onSaved(savedText, savedExtraction, included) }}><Sparkles size={17} /> Add to Keepsake</button>
       {previewState === 'ready' && reviewPeople.length === 1 && reviewPeople[0].name === 'New person' && <p className="empty-line review-hint">No names in this note, so it saves as-is. Mention someone by name and they will get a card.</p>}
     </main>
     )
@@ -867,7 +873,7 @@ export default function App() {
     reloadPeople()
   }
 
-  const saveNote = async (rawText, reviewedExtraction = null) => {
+  const saveNote = async (rawText, reviewedExtraction = null, includedNames = null) => {
     try {
       const response = await fetch('/api/notes', {
         method: 'POST',
@@ -878,12 +884,15 @@ export default function App() {
       const payload = await response.json()
       const extraction = reviewedExtraction || payload.extraction
       if (extraction && payload.note?.id) {
-        const peoplePayload = extraction.people.map(entry => {
+        const indexed = (extraction.people || []).map((entry, i) => ({ entry, i }))
+        const kept = includedNames ? indexed.filter(({ entry }) => includedNames.includes(entry.name)) : indexed
+        const remapped = new Map(kept.map(({ i }, n) => [i, n]))
+        const peoplePayload = kept.map(({ entry }) => {
           const match = people.find(person => person.name.toLowerCase() === String(entry.name || '').toLowerCase())
           return { name: entry.name, relationship: entry.relationship, personId: match?.id, confidence: entry.confidence }
         })
-        const facts = extraction.people.flatMap((entry, person) => (entry.facts || []).map(fact => ({ person, ...fact })))
-        const dates = extraction.people.flatMap((entry, person) => (entry.dates || []).map(date => ({ person, ...date })))
+        const facts = kept.flatMap(({ entry, i }) => (entry.facts || []).map(fact => ({ person: remapped.get(i), ...fact })))
+        const dates = kept.flatMap(({ entry, i }) => (entry.dates || []).map(date => ({ person: remapped.get(i), ...date })))
         const confirm = await fetch(`/api/notes/${payload.note.id}/confirm`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

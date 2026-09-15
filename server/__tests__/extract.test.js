@@ -45,4 +45,29 @@ describe('extractRelationships (local mode, no API key)', () => {
     expect(data.people).toHaveLength(1)
     expect(data.people[0].name).toBe('Maya')
   })
+
+  it('detects a full First Last name bare in the text', async () => {
+    const { data } = await extractRelationships('Jake Stidham joined CHG. I met Jake Stidham today.', [])
+    const names = data.people.map(person => person.name)
+    expect(names).toContain('Jake Stidham')
+    expect(names).not.toContain('Jake')
+    expect(names).not.toContain('Stidham')
+  })
+
+  it('detects a repeated single name at low confidence', async () => {
+    const { data } = await extractRelationships('Maddie called this morning. I saw Maddie at the canyon.', [])
+    expect(data.people).toHaveLength(1)
+    expect(data.people[0]).toMatchObject({ name: 'Maddie', confidence: 0.55 })
+  })
+
+  it('never flags months, weekdays, pronouns, or one-off words', async () => {
+    const { data } = await extractRelationships('We went to Google on Monday in March. They said it was fine.', [])
+    expect(data.people).toEqual([])
+  })
+
+  it('flags ambiguous repeats at low confidence for the user to exclude', async () => {
+    const { data } = await extractRelationships('Love Thai food. Had Thai takeout.', [])
+    expect(data.people).toHaveLength(1)
+    expect(data.people[0].confidence).toBeLessThan(0.6)
+  })
 })

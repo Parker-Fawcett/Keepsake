@@ -184,6 +184,9 @@ button { color: inherit; }
 .review-list { display: grid; margin-top: 20px; border-top: 1px solid var(--ink); }
 .review-card { display: grid; grid-template-columns: 22px 40px 1fr; align-items: center; gap: 9px; border-bottom: 1px solid var(--line); padding: 12px 2px; }
 .review-check { width: 19px; height: 19px; background: var(--forest); color: white; display: grid; place-items: center; }
+.review-check.off { background: transparent; border: 1px solid var(--forest); }
+.review-card.excluded { opacity: .55; }
+.review-card[role="button"] { cursor: pointer; }
 .review-symbol { background: transparent; border: 1px solid var(--forest); color: var(--forest); width: 40px; height: 40px; }
 .review-card > div:last-child { display: flex; flex-direction: column; }
 .review-card small { color: var(--brick); text-transform: uppercase; letter-spacing: .8px; font: 500 8px/1 var(--mono); }
