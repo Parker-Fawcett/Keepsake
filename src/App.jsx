@@ -273,11 +273,21 @@ function Header({ eyebrow, title, action }) {
   )
 }
 
-function AuthModal({ user, onClose, onAuth, onLogout, authError, required = false }) {
+function AuthModal({ user, onClose, onAuth, onLogout, authError, onClearError, required = false }) {
   const [mode, setMode] = useState('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [displayName, setDisplayName] = useState('')
+  const accountExists = authError?.toLowerCase().includes('already registered')
+
+  useEffect(() => {
+    if (mode === 'signup' && accountExists) setMode('login')
+  }, [accountExists, mode])
+
+  const switchMode = () => {
+    onClearError?.()
+    setMode(current => current === 'login' ? 'signup' : 'login')
+  }
   return (
     <div className={`auth-overlay ${required ? 'auth-required' : ''}`} onClick={required ? undefined : onClose}>
       <div className="auth-sheet" onClick={e => e.stopPropagation()}>
@@ -292,9 +302,9 @@ function AuthModal({ user, onClose, onAuth, onLogout, authError, required = fals
             {mode === 'signup' && <label className="auth-field"><span>Name</span><input value={displayName} onChange={e => setDisplayName(e.target.value)} placeholder="What should we call you?" /></label>}
             <label className="auth-field"><span>Email</span><input type="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" /></label>
             <label className="auth-field"><span>Password</span><input type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} value={password} onChange={e => setPassword(e.target.value)} placeholder="8+ characters" /></label>
-            {authError && <p className="auth-error">{authError}</p>}
+            {authError && <p className="auth-error" role="alert">{accountExists && mode === 'login' ? 'That account already exists. Sign in with your existing password below.' : authError}</p>}
             <button className="primary-button wide" disabled={!email.trim() || password.length < 8} onClick={() => onAuth(mode, { email: email.trim(), password, displayName: displayName.trim() })}>{mode === 'login' ? 'Sign in' : 'Create account'}</button>
-            <button className="text-button auth-switch" onClick={() => setMode(mode === 'login' ? 'signup' : 'login')}>{mode === 'login' ? 'New here? Create an account' : 'Already have one? Sign in'}</button>
+            <button className="text-button auth-switch" onClick={switchMode}>{mode === 'login' ? 'New here? Create an account' : 'Already have one? Sign in'}</button>
           </>}
       </div>
     </div>
@@ -821,7 +831,7 @@ export default function App() {
   if (!user) return (
     <div className="app-shell auth-gate">
       <div className="brand-rail"><div className="brand-mark"><Heart size={18} fill="currentColor" /></div><span>Keepsake</span></div>
-      <AuthModal required user={null} authError={authError} onAuth={handleAuth} />
+      <AuthModal required user={null} authError={authError} onClearError={() => setAuthError('')} onAuth={handleAuth} />
     </div>
   )
 
@@ -848,7 +858,7 @@ export default function App() {
       <div className="brand-rail"><div className="brand-mark"><Heart size={18} fill="currentColor" /></div><span>Keepsake</span></div>
       <div className="app-content">{content}</div>
       {!selected && !creating && <nav className="tab-bar">{tabs.map(item => { const Icon = item.icon; return <button key={item.id} className={tab === item.id ? 'active' : ''} onClick={() => setTab(item.id)}><span className={item.id === 'add' ? 'add-tab-icon' : ''}><Icon size={21} /></span><small>{item.label}</small></button> })}</nav>}
-      {accountOpen && <AuthModal user={user} authError={authError} onClose={() => setAccountOpen(false)} onAuth={handleAuth} onLogout={handleLogout} />}
+      {accountOpen && <AuthModal user={user} authError={authError} onClearError={() => setAuthError('')} onClose={() => setAccountOpen(false)} onAuth={handleAuth} onLogout={handleLogout} />}
       {toast && <div className="toast"><Check size={16} /> {toast}</div>}
     </div>
   )
