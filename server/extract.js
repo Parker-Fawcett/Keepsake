@@ -2,6 +2,14 @@ import OpenAI from 'openai'
 
 const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december']
 
+// Sentence-starting verbs whose capitalized companion is not a name.
+// "Love Thai food" must stay out of the person pool even at note start.
+const VERB_STOPWORDS = new Set([
+  'love', 'likes', 'like', 'had', 'has', 'have', 'met', 'saw', 'called',
+  'took', 'got', 'started', 'moved', 'visited', 'tried', 'ordered',
+  'bought', 'watched', 'read', 'heard', 'felt', 'kept', 'talked', 'made',
+])
+
 // Capitalized words that are almost never a person's name. Single
 // occurrences of anything else are ignored; repeats get flagged at low
 // confidence for the user to confirm or exclude in review.
@@ -73,7 +81,13 @@ function localExtraction(rawText, knownPeople) {
   const lower = rawText.toLowerCase()
   const detectedNames = new Set(knownPeople.filter(person => lower.includes(person.name.toLowerCase())).map(person => person.name))
   for (const match of rawText.matchAll(/\b(?:my\s+)?(?:friend|partner|girlfriend|boyfriend|wife|husband|mom|mother|dad|father|sister|brother|coworker)\s+(?:is\s+)?([A-Z][a-z]+)/g)) detectedNames.add(match[1])
-  for (const match of rawText.matchAll(/\b([A-Z][a-z]+)(?:'s|’s)\s+(?:birthday|anniversary|interview|favorite)/g)) detectedNames.add(match[1])
+  // Kin possessives (\"mom's birthday\") name someone; downcased (\"the dog's birthday\") stays out.
+  const KIN_NAMES = { mom: 'Mom', dad: 'Dad', mama: 'Mama', papa: 'Papa', granny: 'Granny' }
+  for (const match of rawText.matchAll(/\b([A-Za-z]+)(?:'s|'s)\s+(?:birthday|anniversary|interview|favorite)/g)) {
+    const word = match[1]
+    if (/^[A-Z][a-z]+$/.test(word)) detectedNames.add(word)
+    else if (KIN_NAMES[word.toLowerCase()]) detectedNames.add(KIN_NAMES[word.toLowerCase()])
+  }
 
   // Full "First Last" names standing bare in the text are high-signal, but a
   // sentence-starting verb pair ("Love Thai food") is not a name. Accept a
@@ -84,7 +98,10 @@ function localExtraction(rawText, knownPeople) {
     const words = match[1].split(/\s+/)
     if (words.some(word => NAME_STOPWORDS.has(word.toLowerCase()))) continue
     const preceding = rawText.slice(0, match.index).trimEnd()
-    const midSentence = preceding !== '' && !/[.!?\n]$/.test(preceding)
+    // A name at the very start of the note counts as "mid-sentence" too,
+    // so it clears the repeated-name filter and enters the bucket.
+    const leadingVerb = preceding === '' && VERB_STOPWORDS.has(words[0].toLowerCase())
+    const midSentence = !leadingVerb && (preceding === '' || !/[.!?\n]$/.test(preceding))
     const sighting = multiSightings.get(match[1]) || { count: 0, midSentence: false }
     sighting.count += 1
     sighting.midSentence = sighting.midSentence || midSentence
@@ -124,18 +141,41 @@ function localExtraction(rawText, knownPeople) {
   }
 
   const names = [...detectedNames]
+  // Facts and dates belong to whoever is named in their sentence. A
+  // dateless, nameless sentence ("He loves vinyl") falls back to whoever
+  // was mentioned last; with nobody mentioned, it is dropped, never spread.
+  const buckets = new Map(names.map(name => [name, { facts: [], dates: [] }]))
+  const sentences = rawText.match(/[^.!?]+[.!?]+|\S[^.!?]*$/g)?.map(sentence => sentence.trim()).filter(Boolean) || []
+  const mentionedIn = sentence => {
+    const lowered = sentence.toLowerCase()
+    return [...detectedNames].filter(name => lowered.includes(name.toLowerCase()))
+  }
+  let lastMention = null
+  for (const sentence of sentences) {
+    const here = mentionedIn(sentence)
+    for (const like of sentence.matchAll(/(?:loves|likes|favorite(?: is| are)?)\s+([^.!?]+)/gi)) {
+      const value = like[1].trim()
+      if (!value) continue
+      const before = sentence.slice(0, like.index).toLowerCase()
+      const namedBefore = here.filter(name => before.includes(name.toLowerCase()))
+      const direct = namedBefore.length > 0 || here.length > 0
+      const targets = namedBefore.length ? namedBefore : (here.length ? here : (lastMention ? [lastMention] : []))
+      for (const target of [...new Set(targets)]) {
+        buckets.get(target).facts.push({ category: 'like', value, confidence: direct ? 0.72 : 0.6 })
+      }
+    }
+    for (const match of sentence.matchAll(new RegExp(`(birthday|anniversary)[^.]{0,20}?(${MONTHS.join('|')})\\s+(\\d{1,2})(?:,?\\s+(\\d{4}))?`, 'gi'))) {
+      const date = { label: match[1].toLowerCase() === 'birthday' ? 'Birthday' : 'Anniversary', month: MONTHS.indexOf(match[2].toLowerCase()) + 1, day: Number(match[3]), year: match[4] ? Number(match[4]) : null, recursYearly: true, confidence: here.length ? 0.82 : 0.6 }
+      const targets = here.length ? here : (lastMention ? [lastMention] : [])
+      for (const target of [...new Set(targets)]) buckets.get(target).dates.push(date)
+    }
+    if (here.length) lastMention = here[here.length - 1]
+  }
   return {
     summary: names.length ? `Found details about ${names.join(', ')}.` : 'This note needs a quick person review.',
     people: names.map(name => {
       const known = knownPeople.find(person => person.name.toLowerCase() === name.toLowerCase())
-      const facts = []
-      const likeMatch = rawText.match(new RegExp(`${name}(?:'s|’s)?[^.]{0,35}?(?:loves|likes|favorite(?: is| are)?)\\s+([^.!?]+)`, 'i'))
-      if (likeMatch) facts.push({ category: 'like', value: likeMatch[1].trim(), confidence: 0.72 })
-
-      const dates = []
-      for (const match of rawText.matchAll(new RegExp(`(?:${name}(?:'s|’s)?[^.]{0,35})?(birthday|anniversary)[^.]{0,20}?(${MONTHS.join('|')})\\s+(\\d{1,2})(?:,?\\s+(\\d{4}))?`, 'gi'))) {
-        dates.push({ label: match[1].toLowerCase() === 'birthday' ? 'Birthday' : 'Anniversary', month: MONTHS.indexOf(match[2].toLowerCase()) + 1, day: Number(match[3]), year: match[4] ? Number(match[4]) : null, recursYearly: true, confidence: 0.82 })
-      }
+      const { facts, dates } = buckets.get(name)
       return {
         name,
         relationship: known?.relationship || null,
@@ -154,11 +194,11 @@ export async function extractRelationships(rawText, knownPeople) {
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
     const response = await client.responses.create({
       model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-    store: false,
-    instructions: `Extract only explicit relationship information from the note. Never invent a person, date, relationship, preference, or event. Use null when the relationship is not stated. Distinguish facts from guesses with calibrated confidence. Known people: ${knownPeople.map(person => `${person.name} (${person.relationship})`).join(', ') || 'none'}.`,
-    input: rawText,
-    text: { format: { type: 'json_schema', name: 'keepsake_relationship_note', strict: true, schema: extractionSchema } },
-  })
+      store: false,
+      instructions: `Extract only explicit relationship information from the note. Never invent a person, date, relationship, preference, or event. Use null when the relationship is not stated. Distinguish facts from guesses with calibrated confidence. Known people: ${knownPeople.map(person => `${person.name} (${person.relationship})`).join(', ') || 'none'}.`,
+      input: rawText,
+      text: { format: { type: 'json_schema', name: 'keepsake_relationship_note', strict: true, schema: extractionSchema } },
+    })
     return { mode: 'openai', data: JSON.parse(response.output_text) }
   } catch {
     return { mode: 'local', data: localExtraction(rawText, knownPeople) }

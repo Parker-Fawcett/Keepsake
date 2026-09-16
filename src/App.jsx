@@ -3,6 +3,7 @@ import { buildCalendarMonth, mapReminderToEvent, recordsFromCsv } from './lib/up
 import {
   ArrowRight,
   Bell,
+  BellOff,
   BookUser,
   BriefcaseBusiness,
   CalendarDays,
@@ -397,7 +398,7 @@ function AuthModal({ user, onClose, onAuth, onLogout, onDeleteAccount, authError
   )
 }
 
-function Today({ onOpen, onAdd, onShowPeople, user, onAccount, comingUp, people, checkins, notificationState, onNotifications }) {
+function Today({ onOpen, onAdd, onShowPeople, onOpenPerson, user, onAccount, comingUp, people, checkins, notificationState, onNotifications }) {
   const teaser = comingUp?.slice(0, 2) || []
   const firstEvent = teaser[0]
   const firstName = String(user?.display_name || user?.email?.split('@')[0] || 'friend').split(' ')[0]
@@ -451,7 +452,7 @@ function Today({ onOpen, onAdd, onShowPeople, user, onAccount, comingUp, people,
           </div>
         </div>
         <div className="event-list compact">
-          {teaser.map((event) => <EventRow event={event} key={`${event.title}-${event.date}-${event.person}`} />)}
+          {teaser.map((event) => <EventRow event={event} onOpen={onOpenPerson} key={`${event.title}-${event.date}-${event.person}`} />)}
           {!teaser.length && <div className="empty-state"><CalendarDays size={20} /><strong>No upcoming moments yet</strong><span>Dates you confirm from notes will appear here automatically.</span></div>}
         </div>
       </section>
@@ -485,15 +486,25 @@ function Today({ onOpen, onAdd, onShowPeople, user, onAccount, comingUp, people,
   )
 }
 
-function EventRow({ event }) {
+function EventRow({ event, onOpen }) {
   const Icon = event.icon
-  return (
+  if (!onOpen) {
+    return (
     <article className="event-row">
       <div className="date-block"><span>{event.day}</span><strong>{event.date}</strong></div>
       <div className="event-marker" style={{ background: event.color }}><Icon size={17} /></div>
       <div className="event-copy"><small>{event.person}</small><strong>{event.title}</strong><span>{event.meta}</span></div>
       <ChevronRight size={18} className="chevron" />
     </article>
+    )
+  }
+  return (
+    <button className="event-row event-button" onClick={() => onOpen(event.person)}>
+      <div className="date-block"><span>{event.day}</span><strong>{event.date}</strong></div>
+      <div className="event-marker" style={{ background: event.color }}><Icon size={17} /></div>
+      <div className="event-copy"><small>{event.person}</small><strong>{event.title}</strong><span>{event.meta}</span></div>
+      <ChevronRight size={18} className="chevron" />
+    </button>
   )
 }
 
@@ -506,7 +517,18 @@ function useUpcomingReminders(enabled) {
     }
     fetch('/api/reminders/upcoming?limit=20')
       .then(response => response.ok ? response.json() : Promise.reject(new Error('offline')))
-      .then(({ reminders }) => setEvents((reminders || []).map(mapReminderToEvent)))
+      .then(({ reminders }) => {
+        // Each important date produces multiple reminder rows (e.g. 2 weeks
+        // and 3 days before). Collapse to one event per person · date,
+        // keeping the soonest upcoming reminder so the feed stays readable.
+        const bestByKey = new Map()
+        for (const r of reminders || []) {
+          const key = `${r.person_name}|${r.date_label || r.title}`
+          const prev = bestByKey.get(key)
+          if (!prev || r.remind_at < prev.remind_at) bestByKey.set(key, r)
+        }
+        setEvents([...bestByKey.values()].sort((a, b) => a.remind_at.localeCompare(b.remind_at)).map(mapReminderToEvent))
+      })
       .catch(() => setEvents(null))
   }, [enabled])
   return events
@@ -529,7 +551,7 @@ function useWeeklyDigest(enabled) {
   return quiet
 }
 
-function Upcoming({ events }) {
+function Upcoming({ events, onOpenPerson }) {
   const moments = events || []
   const today = new Date()
   const [monthOffset, setMonthOffset] = useState(0)
@@ -579,7 +601,7 @@ function Upcoming({ events }) {
       </div>
       <section className="section">
         <div className="section-heading"><div><p className="kicker">{picked ? `${grid.label.split(' ')[0]} ${picked.day}` : 'Next in your circle'}</p><h2>{picked ? 'That day' : 'Moments ahead'}</h2></div>{picked && <button className="link-button" onClick={() => setPicked(null)}>Show all <ChevronRight size={15} /></button>}</div>
-        <div className="event-list">{shown.map(event => <EventRow event={event} key={`${event.title}-${event.date}-${event.person}`} />)}{!shown.length && <div className="empty-state"><CalendarDays size={20} /><strong>{picked ? 'Nothing that day' : 'No reminders scheduled'}</strong><span>{picked ? 'Pick another day or come back to everything.' : 'Confirmed birthdays, anniversaries, and events will collect here.'}</span></div>}</div>
+        <div className="event-list">{shown.map(event => <EventRow event={event} onOpen={onOpenPerson} key={`${event.title}-${event.date}-${event.person}`} />)}{!shown.length && <div className="empty-state"><CalendarDays size={20} /><strong>{picked ? 'Nothing that day' : 'No reminders scheduled'}</strong><span>{picked ? 'Pick another day or come back to everything.' : 'Confirmed birthdays, anniversaries, and events will collect here.'}</span></div>}</div>
       </section>
     </main>
   )
@@ -794,8 +816,22 @@ function PersonDetail({ person, onBack, onPhoto }) {
       setDateError(error.message)
     }
   }
-  const saveLike = async () => {
-    setLikeError('')
+  const toggleDateReminders = async dateId => {
+    try {
+      const response = await fetch(`/api/people/${person.id}/dates/${dateId}/reminders/toggle`, { method: 'POST' })
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload.error || 'Could not change those reminders.')
+      setLive(prev => {
+        if (!prev) return prev
+        const remaining = prev.reminders.filter(reminder => reminder.important_date_id !== dateId)
+        const added = (payload.reminders || []).map(reminder => ({ ...reminder, important_date_id: dateId }))
+        return { ...prev, reminders: [...remaining, ...added] }
+      })
+    } catch (error) {
+      setDateError(error.message)
+    }
+  }
+  const saveLike = async () => {    setLikeError('')
     const value = likeValue.trim()
     if (!value) return
     try {
@@ -814,7 +850,8 @@ function PersonDetail({ person, onBack, onPhoto }) {
     }
   }
   const displayPerson = { ...person, avatar_url: live?.person?.avatar_url || person.avatar_url }
-  const dates = live ? live.dates.map(date => ({ label: date.label, value: formatStoredDate(date) })) : person.dates
+  const dates = live ? live.dates.map(date => ({ id: date.id, label: date.label, value: formatStoredDate(date) })) : person.dates
+  const liveReminderDateIds = new Set((live?.reminders || []).map(reminder => reminder.important_date_id))
   const likes = live ? live.facts.filter(fact => fact.category === 'like').map(fact => fact.value) : person.likes
   const notes = [...localNotes, ...(live ? live.notes.map(entry => entry.raw_text) : person.notes)]
   return (
@@ -844,7 +881,12 @@ function PersonDetail({ person, onBack, onPhoto }) {
             <button className="primary-button wide" onClick={saveDate}>Save date</button>
           </div>
         )}
-        {dates.map(date => <div className="info-row" key={date.label}><span className="info-icon rose"><CalendarDays size={17} /></span><div><small>{date.label}</small><strong>{date.value}</strong></div><Bell size={16} /></div>)}
+        {dates.map(date => {
+          const muted = date.id ? !liveReminderDateIds.has(date.id) : false
+          return <div className="info-row" key={date.id || date.label}><span className="info-icon rose"><CalendarDays size={17} /></span><div><small>{date.label}</small><strong>{date.value}</strong></div>{date.id
+            ? <button className="bell-button" aria-label={muted ? `Remind me about ${date.label}` : `Mute ${date.label} reminders`} title={muted ? 'Reminders off — tap to turn on' : 'Reminders on — tap to mute'} onClick={() => toggleDateReminders(date.id)}>{muted ? <BellOff size={16} /> : <Bell size={16} />}</button>
+            : <Bell size={16} />}</div>
+        })}
         {dates.length === 0 && !showDateForm && <p className="empty-line">Nothing saved yet.</p>}
       </section>
       <section className="detail-section">
@@ -1207,8 +1249,12 @@ export default function App() {
     enableNotifications({ silent: true })
   }, [user, authReady, onboarding])
 
-  const deletePeople = async ids => {
-    try {
+  const openEventPerson = name => {
+    const match = people.find(person => person.name.toLowerCase() === String(name || '').toLowerCase())
+    if (match) setSelected(match)
+  }
+
+  const deletePeople = async ids => {    try {
       await Promise.all(ids.map(async id => {
         const response = await fetch(`/api/people/${id}`, { method: 'DELETE' })
         if (!response.ok) throw new Error('Could not delete yet')
@@ -1317,8 +1363,8 @@ export default function App() {
   let content
   if (selected) content = <PersonDetail person={selected} onBack={() => setSelected(null)} onPhoto={(id, avatar_url) => setPeople(prev => prev.map(entry => entry.id === id ? { ...entry, avatar_url } : entry))} />
   else if (creating) content = <AddPerson onCancel={() => setCreating(false)} onSave={addPerson} />
-  else if (tab === 'today') content = <Today onOpen={setSelected} onAdd={() => setTab('add')} onShowPeople={() => setTab('relationships')} user={user} onAccount={() => { setAuthError(''); setAccountOpen(true) }} comingUp={liveEvents} people={people} checkins={quietPeople} notificationState={notificationState} onNotifications={enableNotifications} />
-  else if (tab === 'upcoming') content = <Upcoming events={liveEvents} />
+  else if (tab === 'today') content = <Today onOpen={setSelected} onAdd={() => setTab('add')} onShowPeople={() => setTab('relationships')} onOpenPerson={openEventPerson} user={user} onAccount={() => { setAuthError(''); setAccountOpen(true) }} comingUp={liveEvents} people={people} checkins={quietPeople} notificationState={notificationState} onNotifications={enableNotifications} />
+  else if (tab === 'upcoming') content = <Upcoming events={liveEvents} onOpenPerson={openEventPerson} />
   else if (tab === 'relationships') content = <Relationships people={people} onOpen={setSelected} onCreate={() => setCreating(true)} onDelete={deletePeople} />
   else content = <AddMemory people={people} onImported={handleImport} onSaved={saveNote} />
 

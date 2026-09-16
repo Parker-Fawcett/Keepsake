@@ -649,7 +649,7 @@ app.get('/api/people/:id/details', async (request, response, next) => {
     const facts = await sql`SELECT id, category, value, confidence, confirmed_at FROM facts WHERE person_id = ${person.id} ORDER BY created_at`
     const dates = await sql`SELECT id, label, month, day, year, recurs_yearly, confidence FROM important_dates WHERE person_id = ${person.id} ORDER BY month, day`
     const reminders = await sql`
-      SELECT id, title, remind_at FROM reminders
+      SELECT id, important_date_id, title, remind_at FROM reminders
       WHERE person_id = ${person.id} AND owner_id = ${ownerId} AND status = 'scheduled' AND remind_at >= now()
       ORDER BY remind_at LIMIT 10
     `
@@ -726,6 +726,52 @@ app.post('/api/people/:id/facts', async (request, response, next) => {
       RETURNING id, category, value
     `
     response.status(201).json({ fact })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/people/:id/dates/:dateId/reminders/toggle', async (request, response, next) => {
+  try {
+    const ownerId = ownerIdFor(request)
+    const [person] = await sql`SELECT id, name FROM people WHERE id = ${request.params.id} AND owner_id = ${ownerId} AND archived_at IS NULL`
+    if (!person) return response.status(404).json({ error: 'Not found.' })
+    const [date] = await sql`SELECT id, label, month, day, year, recurs_yearly FROM important_dates WHERE id = ${request.params.dateId} AND person_id = ${person.id}`
+    if (!date) return response.status(404).json({ error: 'Not found.' })
+
+    const live = await sql`
+      SELECT id FROM reminders
+      WHERE important_date_id = ${date.id} AND status = 'scheduled' AND remind_at >= now()
+    `
+    if (live.length) {
+      await sql`UPDATE reminders SET status = 'cancelled' WHERE important_date_id = ${date.id} AND status = 'scheduled'`
+      return response.json({ muted: true, reminders: [] })
+    }
+    // Reactivate still-future rows muted earlier instead of duplicating them.
+    const reactivated = await sql`
+      UPDATE reminders SET status = 'scheduled'
+      WHERE important_date_id = ${date.id} AND status = 'cancelled' AND remind_at >= now()
+      RETURNING id, title, remind_at
+    `
+    if (reactivated.length) return response.json({ muted: false, reminders: reactivated })
+    const reminders = []
+    for (const item of buildRemindersForDate({
+      personName: person.name,
+      label: date.label,
+      month: date.month,
+      day: date.day,
+      year: date.year,
+      recursYearly: date.recurs_yearly,
+    }, DEFAULT_REMINDER_RULES, new Date())) {
+      const [reminder] = await sql`
+        INSERT INTO reminders (owner_id, person_id, important_date_id, title, remind_at)
+        VALUES (${ownerId}, ${person.id}, ${date.id}, ${item.title}, ${item.remindAt.toISOString()})
+        ON CONFLICT DO NOTHING
+        RETURNING id, title, remind_at
+      `
+      if (reminder) reminders.push(reminder)
+    }
+    response.json({ muted: reminders.length === 0, reminders })
   } catch (error) {
     next(error)
   }
