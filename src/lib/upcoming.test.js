@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CakeSlice, CalendarDays, Heart } from 'lucide-react'
+import { CakeSlice, CalendarDays, Church, Coffee, Gift, GraduationCap, Heart, Home, PawPrint, Plane, PlaneTakeoff, Snowflake, Star, Stethoscope } from 'lucide-react'
 import {
   buildCalendarMonth,
   colorForName,
@@ -23,10 +23,25 @@ describe('iconForReminder', () => {
   it('picks the cake for birthdays and the heart for anniversaries', () => {
     expect(iconForReminder('Mom · Birthday', 'Birthday')).toBe(CakeSlice)
     expect(iconForReminder('Us', 'Anniversary')).toBe(Heart)
+    expect(iconForReminder('Wedding anniversary', 'Anniversary')).toBe(Heart)
+  })
+
+  it('maps the common life events to distinct icons', () => {
+    expect(iconForReminder('Graduation', 'Graduation')).toBe(GraduationCap)
+    expect(iconForReminder('Interview', 'Interview')).toBe(Star)
+    expect(iconForReminder('Christmas', 'Holiday')).toBe(Snowflake)
+    expect(iconForReminder('Moving day', 'Moving')).toBe(Home)
+    expect(iconForReminder('Gift ride', 'Gift')).toBe(Gift)
+    expect(iconForReminder('Got a puppy', 'Got a puppy')).toBe(PawPrint)
+    expect(iconForReminder('Trip to Rome', 'Travel')).toBe(Plane)
+    expect(iconForReminder('Wedding', 'Wedding')).toBe(Church)
+    expect(iconForReminder('Flight home', 'Travel')).toBe(PlaneTakeoff)
+    expect(iconForReminder('Coffee date', 'Date')).toBe(Coffee)
+    expect(iconForReminder('Dentist', 'Appointment')).toBe(Stethoscope)
   })
 
   it('falls back to the calendar for anything else', () => {
-    expect(iconForReminder('Dentist', 'Appointment')).toBe(CalendarDays)
+    expect(iconForReminder('Random thing', 'Other')).toBe(CalendarDays)
   })
 })
 

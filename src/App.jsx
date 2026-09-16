@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { buildCalendarMonth, mapReminderToEvent, recordsFromCsv } from './lib/upcoming.js'
+import { buildCalendarMonth, iconForReminder, mapReminderToEvent, recordsFromCsv } from './lib/upcoming.js'
 import {
   ArrowRight,
   Bell,
@@ -919,8 +919,9 @@ function PersonDetail({ person, onBack, onPhoto }) {
           </div>
         )}
         {dates.map(date => {
+          const DateIcon = iconForReminder(date.label, date.label)
           const muted = date.id ? !liveReminderDateIds.has(date.id) : false
-          return <div className="info-row" key={date.id || date.label}><span className="info-icon rose"><CalendarDays size={17} /></span><div><small>{date.label}</small><strong>{date.value}</strong></div><div className="row-actions">{date.id
+          return <div className="info-row" key={date.id || date.label}><span className="info-icon rose"><DateIcon size={17} /></span><div><small>{date.label}</small><strong>{date.value}</strong></div><div className="row-actions">{date.id
             ? <>
               <button className="bell-button" aria-label={muted ? `Remind me about ${date.label}` : `Mute ${date.label} reminders`} title={muted ? 'Reminders off — tap to turn on' : 'Reminders on — tap to mute'} onClick={() => toggleDateReminders(date.id)}>{muted ? <BellOff size={16} /> : <Bell size={16} />}</button>
               <button className="tiny-icon" aria-label={`Edit ${date.label}`} title="Edit date" onClick={() => startEditDate(date)}><Pencil size={15} /></button>

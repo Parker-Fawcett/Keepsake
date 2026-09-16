@@ -1,4 +1,4 @@
-import { CakeSlice, CalendarDays, Gift, Heart, Home, Star } from 'lucide-react'
+import { Baby, Briefcase, CakeSlice, CalendarDays, Church, Coffee, Gift, GraduationCap, Heart, Home, MapPin, Music, Palmtree, PartyPopper, PawPrint, Phone, Plane, PlaneTakeoff, Snowflake, Sparkles, Star, Stethoscope, Sun, Trophy, Wine } from 'lucide-react'
 
 // Pure helpers that shape scheduled reminders into event rows and parse
 // contact CSVs. Tested in node; no DOM needed.
@@ -11,13 +11,41 @@ export function colorForName(name) {
   return reminderPalette[hash % reminderPalette.length]
 }
 
+// First match wins; more specific phrases come before generic ones so a
+// "wedding anniversary" reads as a heart, not a church.
+const iconRules = [
+  [/birthday/, CakeSlice],
+  [/annivers/, Heart],
+  [/valentine|proposal|engagement/, Heart],
+  [/graduat/, GraduationCap],
+  [/wedding/, Church],
+  [/interview/, Star],
+  [/new year/, Sparkles],
+  [/christmas/, Snowflake],
+  [/holiday|festival/, PartyPopper],
+  [/easter|spring/, Sun],
+  [/flight|airport|takeoff/, PlaneTakeoff],
+  [/vacation|vacay|travel|trip to/, Plane],
+  [/trip/, Palmtree],
+  [/move|moving|new home|house/, Home],
+  [/gift/, Gift],
+  [/baby|due date/, Baby],
+  [/dog|puppy|pet|kitten|\bcat\b/, PawPrint],
+  [/dinner|lunch|breakfast|brunch|restaurant|coffee/, Coffee],
+  [/wine|beer|drinks/, Wine],
+  [/concert|show|gig/, Music],
+  [/race|marathon|workout|gym|football|game|match/, Trophy],
+  [/dr(s\.)? appointment|checkup|dentist|doctor/, Stethoscope],
+  [/work|job|promotion/, Briefcase],
+  [/phone|call|catch.?up/, Phone],
+  [/meet|outing|walk/, MapPin],
+  [/^us$|together|dating|married|met/, Heart],
+  [/school|class|semester|exam/, GraduationCap],
+]
+
 export function iconForReminder(title, dateLabel) {
   const text = `${title || ''} ${dateLabel || ''}`.toLowerCase()
-  if (text.includes('birthday')) return CakeSlice
-  if (text.includes('annivers')) return Heart
-  if (text.includes('interview')) return Star
-  if (text.includes('moving') || text.includes('home')) return Home
-  if (text.includes('gift')) return Gift
+  for (const [pattern, Icon] of iconRules) if (pattern.test(text)) return Icon
   return CalendarDays
 }
 
