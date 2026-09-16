@@ -9,7 +9,7 @@ import { buildImportReview, MAX_REVIEW_RECORDS, validateImportConfirm } from './
 import { buildAuthUrl, exchangeCode, fetchConnections, isGoogleConfigured, redirectUriFor, refreshAccessToken } from './google.js'
 import { validateConfirmPayload, FACT_CATEGORIES, validateDateFields } from './confirm.js'
 import { rateLimit } from './ratelimit.js'
-import { buildRemindersForDate, DEFAULT_REMINDER_RULES } from './reminders.js'
+import { buildRemindersForDate, DEFAULT_REMINDER_RULES, nextOccurrence } from './reminders.js'
 import { buildWeeklyReview } from './digest.js'
 import { handleMcpRequest } from './mcp.js'
 import { randomBytes } from 'node:crypto'
@@ -631,7 +631,48 @@ app.get('/api/reminders/upcoming', async (request, response, next) => {
       ORDER BY reminders.remind_at
       LIMIT ${limit}
     `
-    response.json({ reminders })
+
+    // A date whose reminder slots (14d / 3d before) have already passed has
+    // no future reminder row, so it would never surface. Make the feed fall
+    // back to the date's own next occurrence when it is genuinely upcoming.
+    const rows = [...reminders]
+    if (reminders.length < limit) {
+      const dates = await sql`
+        SELECT important_dates.id, important_dates.label, important_dates.month,
+               important_dates.day, important_dates.year, important_dates.recurs_yearly,
+               people.name AS person_name
+        FROM important_dates
+        JOIN people ON people.id = important_dates.person_id
+        WHERE people.owner_id = ${ownerIdFor(request)}
+          AND people.archived_at IS NULL
+      `
+      const needFallback = new Set()
+      for (const row of reminders) {
+        if (!row.person_name) continue
+        const key = `${row.person_name}|${row.date_label || row.title}`
+        needFallback.add(key)
+      }
+      for (const date of dates) {
+        const key = `${date.person_name}|${date.label}`
+        if (needFallback.has(key)) continue
+        const occurrence = nextOccurrence(
+          { month: date.month, day: date.day, year: date.year, recursYearly: date.recurs_yearly },
+          new Date(),
+        )
+        if (!occurrence || occurrence.getTime() - Date.now() > 45 * 24 * 60 * 60 * 1000) continue
+        rows.push({
+          id: null,
+          title: `${date.person_name} · ${date.label}`,
+          remind_at: occurrence.toISOString(),
+          status: 'scheduled',
+          person_name: date.person_name,
+          date_label: date.label,
+        })
+      }
+      rows.sort((a, b) => a.remind_at.localeCompare(b.remind_at))
+    }
+
+    response.json({ reminders: rows.slice(0, limit) })
   } catch (error) {
     next(error)
   }

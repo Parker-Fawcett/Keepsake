@@ -52,6 +52,17 @@ export function buildRemindersForDate(date, rules = DEFAULT_REMINDER_RULES, now 
     seen.add(remindAt.getTime())
     reminders.push({ title: `${date.personName} · ${date.label}`, remindAt })
   }
+  // A date inside the reminder window has no ahead-of-time slot left. Fall
+  // back to the day itself so the event still shows in upcoming and the
+  // yearly reschedule can chain from it. Malformed rules never produce a
+  // reminder.
+  if (reminders.length === 0 && validRules(rules).length > 0) {
+    reminders.push({ title: `${date.personName} · ${date.label}`, remindAt: occurrence })
+  }
   reminders.sort((a, b) => a.remindAt - b.remindAt)
   return reminders
 }
+
+// The upcoming feed should never go blank for a date whose reminder slots
+// (14d / 3d before) have already passed. buildRemindersForDate falls back
+// to the occurrence day itself so the event stays visible up to its day.

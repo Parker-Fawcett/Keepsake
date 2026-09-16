@@ -67,4 +67,27 @@ describe('buildRemindersForDate', () => {
     expect(reminders).toHaveLength(1)
     expect(reminders[0].remindAt).toEqual(new Date('2026-11-01T09:00:00Z'))
   })
+
+  it('falls back to the occurrence day inside the reminder window', () => {
+    const now = new Date('2026-09-16T12:00:00Z')
+    const reminders = buildRemindersForDate(
+      { personName: 'Madeline', label: 'Birthday', month: 9, day: 18, year: null, recursYearly: true },
+      DEFAULT_REMINDER_RULES,
+      now,
+    )
+    expect(reminders).toHaveLength(1)
+    expect(reminders[0].remindAt).toEqual(new Date('2026-09-18T09:00:00Z'))
+  })
+
+  it('does not create a reminder for a date already past', () => {
+    const now = new Date('2026-09-20T12:00:00Z')
+    const reminders = buildRemindersForDate(
+      { personName: 'Madeline', label: 'Birthday', month: 9, day: 18, year: null, recursYearly: true },
+      DEFAULT_REMINDER_RULES,
+      now,
+    )
+    // Sept 18 is gone; next occurrence rolls to next year and its 14d/3d slots are still ahead.
+    expect(reminders.length).toBeGreaterThanOrEqual(1)
+    expect(reminders.every(reminder => reminder.remindAt.getTime() > now.getTime())).toBe(true)
+  })
 })
