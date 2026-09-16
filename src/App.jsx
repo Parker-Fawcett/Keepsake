@@ -17,10 +17,12 @@ import {
   Home,
   Lightbulb,
   Mic,
+  Pencil,
   Plus,
   Search,
   ShieldCheck,
   Sparkles,
+  Trash2,
   Users,
   X,
 } from 'lucide-react'
@@ -742,6 +744,7 @@ function PersonDetail({ person, onBack, onPhoto }) {
   const [live, setLive] = useState(null)
   const [photoError, setPhotoError] = useState('')
   const [showDateForm, setShowDateForm] = useState(false)
+  const [editingDateId, setEditingDateId] = useState(null)
   const [dateLabel, setDateLabel] = useState('Birthday')
   const [dateMonth, setDateMonth] = useState(1)
   const [dateDay, setDateDay] = useState(1)
@@ -797,21 +800,55 @@ function PersonDetail({ person, onBack, onPhoto }) {
   const saveDate = async () => {
     setDateError('')
     try {
-      const response = await fetch(`/api/people/${person.id}/dates`, {
-        method: 'POST',
+      const body = {
+        label: dateLabel.trim(),
+        month: Number(dateMonth),
+        day: Number(dateDay),
+        year: dateYear.trim() === '' ? null : Number(dateYear),
+      }
+      const url = editingDateId ? `/api/people/${person.id}/dates/${editingDateId}` : `/api/people/${person.id}/dates`
+      const response = await fetch(url, {
+        method: editingDateId ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          label: dateLabel.trim(),
-          month: Number(dateMonth),
-          day: Number(dateDay),
-          year: dateYear.trim() === '' ? null : Number(dateYear),
-        }),
+        body: JSON.stringify(body),
       })
       const payload = await response.json()
       if (!response.ok) throw new Error(payload.error || 'Could not save that date.')
-      setLive(prev => (prev ? { ...prev, dates: [...prev.dates, payload.date] } : prev))
+      setLive(prev => {
+        if (!prev) return prev
+        const others = prev.dates.filter(date => date.id !== payload.date.id)
+        const reminders = (payload.reminders || []).map(reminder => ({ ...reminder, important_date_id: payload.date.id }))
+        return { ...prev, dates: [...others, payload.date].sort((a, b) => (a.month - b.month) || (a.day - b.day)), reminders: prev.reminders.filter(reminder => reminder.important_date_id !== payload.date.id).concat(reminders) }
+      })
       setShowDateForm(false)
+      setEditingDateId(null)
       setDateYear('')
+    } catch (error) {
+      setDateError(error.message)
+    }
+  }
+  const startEditDate = date => {
+    setEditingDateId(date.id)
+    setDateLabel(date.label)
+    setDateMonth(date.month)
+    setDateDay(date.day)
+    setDateYear(date.year === null || date.year === undefined ? '' : String(date.year))
+    setDateError('')
+    setShowDateForm(true)
+  }
+  const cancelDateForm = () => {
+    setShowDateForm(false)
+    setEditingDateId(null)
+    setDateError('')
+  }
+  const removeDate = async dateId => {
+    setDateError('')
+    try {
+      const response = await fetch(`/api/people/${person.id}/dates/${dateId}`, { method: 'DELETE' })
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload.error || 'Could not remove that date.')
+      setLive(prev => (prev ? { ...prev, dates: prev.dates.filter(date => date.id !== dateId), reminders: prev.reminders.filter(reminder => reminder.important_date_id !== dateId) } : prev))
+      if (editingDateId === dateId) cancelDateForm()
     } catch (error) {
       setDateError(error.message)
     }
@@ -850,7 +887,7 @@ function PersonDetail({ person, onBack, onPhoto }) {
     }
   }
   const displayPerson = { ...person, avatar_url: live?.person?.avatar_url || person.avatar_url }
-  const dates = live ? live.dates.map(date => ({ id: date.id, label: date.label, value: formatStoredDate(date) })) : person.dates
+  const dates = live ? live.dates.map(date => ({ id: date.id, label: date.label, month: date.month, day: date.day, year: date.year, value: formatStoredDate(date) })) : person.dates
   const liveReminderDateIds = new Set((live?.reminders || []).map(reminder => reminder.important_date_id))
   const likes = live ? live.facts.filter(fact => fact.category === 'like').map(fact => fact.value) : person.likes
   const notes = [...localNotes, ...(live ? live.notes.map(entry => entry.raw_text) : person.notes)]
@@ -868,7 +905,7 @@ function PersonDetail({ person, onBack, onPhoto }) {
         <p>{person.memory}</p>
       </div>
       <section className="detail-section">
-        <div className="section-heading"><h2>Important dates</h2><button className="tiny-add" onClick={() => { setDateError(''); setShowDateForm(current => !current) }}><Plus size={15} /> Add</button></div>
+        <div className="section-heading"><h2>Important dates</h2><button className="tiny-add" onClick={() => { setDateError(''); setEditingDateId(null); setShowDateForm(current => !current) }}><Plus size={15} /> Add</button></div>
         {showDateForm && (
           <div className="inline-form">
             <label className="auth-field"><span>Label</span><input value={dateLabel} onChange={e => setDateLabel(e.target.value)} placeholder="Birthday" /></label>
@@ -878,14 +915,18 @@ function PersonDetail({ person, onBack, onPhoto }) {
               <label className="auth-field"><span>Year (optional)</span><input inputMode="numeric" value={dateYear} onChange={e => setDateYear(e.target.value.replace(/[^0-9]/g, '').slice(0, 4))} placeholder="—" /></label>
             </div>
             {dateError && <p className="auth-error">{dateError}</p>}
-            <button className="primary-button wide" onClick={saveDate}>Save date</button>
+            <div className="inline-actions"><button className="primary-button wide" onClick={saveDate}>{editingDateId ? 'Save changes' : 'Save date'}</button>{editingDateId && <button className="text-button" onClick={cancelDateForm}>Cancel</button>}</div>
           </div>
         )}
         {dates.map(date => {
           const muted = date.id ? !liveReminderDateIds.has(date.id) : false
-          return <div className="info-row" key={date.id || date.label}><span className="info-icon rose"><CalendarDays size={17} /></span><div><small>{date.label}</small><strong>{date.value}</strong></div>{date.id
-            ? <button className="bell-button" aria-label={muted ? `Remind me about ${date.label}` : `Mute ${date.label} reminders`} title={muted ? 'Reminders off — tap to turn on' : 'Reminders on — tap to mute'} onClick={() => toggleDateReminders(date.id)}>{muted ? <BellOff size={16} /> : <Bell size={16} />}</button>
-            : <Bell size={16} />}</div>
+          return <div className="info-row" key={date.id || date.label}><span className="info-icon rose"><CalendarDays size={17} /></span><div><small>{date.label}</small><strong>{date.value}</strong></div><div className="row-actions">{date.id
+            ? <>
+              <button className="bell-button" aria-label={muted ? `Remind me about ${date.label}` : `Mute ${date.label} reminders`} title={muted ? 'Reminders off — tap to turn on' : 'Reminders on — tap to mute'} onClick={() => toggleDateReminders(date.id)}>{muted ? <BellOff size={16} /> : <Bell size={16} />}</button>
+              <button className="tiny-icon" aria-label={`Edit ${date.label}`} title="Edit date" onClick={() => startEditDate(date)}><Pencil size={15} /></button>
+              <button className="tiny-icon danger" aria-label={`Delete ${date.label}`} title="Delete date" onClick={() => { if (window.confirm(`Delete ${date.label} for ${person.name}?`)) removeDate(date.id) }}><Trash2 size={15} /></button>
+            </>
+            : <Bell size={16} />}</div></div>
         })}
         {dates.length === 0 && !showDateForm && <p className="empty-line">Nothing saved yet.</p>}
       </section>

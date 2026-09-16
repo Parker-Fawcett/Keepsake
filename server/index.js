@@ -711,6 +711,61 @@ app.post('/api/people/:id/dates', async (request, response, next) => {
   }
 })
 
+app.patch('/api/people/:id/dates/:dateId', async (request, response, next) => {
+  try {
+    const ownerId = ownerIdFor(request)
+    const [person] = await sql`SELECT id, name FROM people WHERE id = ${request.params.id} AND owner_id = ${ownerId} AND archived_at IS NULL`
+    if (!person) return response.status(404).json({ error: 'Not found.' })
+    const [existing] = await sql`
+      SELECT id, label, month, day, year, recurs_yearly
+      FROM important_dates
+      WHERE id = ${request.params.dateId} AND person_id = ${person.id}
+    `
+    if (!existing) return response.status(404).json({ error: 'Not found.' })
+    const checked = validateDateFields({ ...request.body, recursYearly: request.body.recursYearly ?? existing.recurs_yearly })
+    if (!checked.ok) return response.status(400).json({ error: checked.errors[0], errors: checked.errors })
+    const { date } = checked
+    const [row] = await sql`
+      UPDATE important_dates
+      SET label = ${date.label}, month = ${date.month}, day = ${date.day}, year = ${date.year}, recurs_yearly = ${date.recursYearly}
+      WHERE id = ${existing.id}
+      RETURNING id, label, month, day, year, recurs_yearly
+    `
+    // The old reminder slots are now stale. Clear still-future ones and
+    // rebuild from the new date so Today/Upcoming and pushes stay correct.
+    await sql`DELETE FROM reminders WHERE important_date_id = ${existing.id} AND remind_at >= now()`
+    const reminders = []
+    for (const item of buildRemindersForDate({ personName: person.name, ...date }, DEFAULT_REMINDER_RULES, new Date())) {
+      const [reminder] = await sql`
+        INSERT INTO reminders (owner_id, person_id, important_date_id, title, remind_at)
+        VALUES (${ownerId}, ${person.id}, ${row.id}, ${item.title}, ${item.remindAt.toISOString()})
+        ON CONFLICT DO NOTHING
+        RETURNING id, title, remind_at
+      `
+      if (reminder) reminders.push(reminder)
+    }
+    response.json({ date: row, reminders })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.delete('/api/people/:id/dates/:dateId', async (request, response, next) => {
+  try {
+    const [person] = await sql`SELECT id FROM people WHERE id = ${request.params.id} AND owner_id = ${ownerIdFor(request)} AND archived_at IS NULL`
+    if (!person) return response.status(404).json({ error: 'Not found.' })
+    const [removed] = await sql`
+      DELETE FROM important_dates
+      WHERE id = ${request.params.dateId} AND person_id = ${person.id}
+      RETURNING id
+    `
+    if (!removed) return response.status(404).json({ error: 'Not found.' })
+    response.json({ deleted: true })
+  } catch (error) {
+    next(error)
+  }
+})
+
 app.post('/api/people/:id/facts', async (request, response, next) => {
   try {
     const ownerId = ownerIdFor(request)

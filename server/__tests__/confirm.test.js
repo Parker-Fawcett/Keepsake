@@ -60,10 +60,17 @@ describe('validateDateFields', () => {
     })
   })
 
-  it('rejects bad months, days, labels, and years', () => {
+it('rejects bad months, days, labels, and years', () => {
     expect(validateDateFields({ label: 'X', month: 13, day: 1 }).ok).toBe(false)
     expect(validateDateFields({ label: 'X', month: 1, day: 32 }).ok).toBe(false)
     expect(validateDateFields({ label: '  ', month: 1, day: 1 }).ok).toBe(false)
     expect(validateDateFields({ label: 'X', month: 1, day: 1, year: 20.5 }).ok).toBe(false)
+  })
+
+  it('defaults recursYearly and confidence when omitted (PATCH payloads)', () => {
+    const result = validateDateFields({ label: 'Birthday', month: 12, day: 29, year: null })
+    expect(result.ok).toBe(true)
+    expect(result.date.recursYearly).toBe(true)
+    expect(result.date.confidence).toBe(1)
   })
 })
